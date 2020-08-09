@@ -26,6 +26,8 @@ InvenTree | {% trans "Search Results" %}
 
 {% include "InvenTree/search_parts.html" with collapse_id='parts' %}
 
+{% include "InvenTree/search_stock.html" with collapse_id='stock' %}
+
 {% include "InvenTree/search_company.html" with collapse_id='companies' %}
 
 {% include "InvenTree/search_supplier_parts.html" with collapse_id='supplier_parts' %}
@@ -79,6 +81,8 @@ InvenTree | {% trans "Search Results" %}
     onSearchResults("#location-results-table", "#location-results-count");
 
     onSearchResults('#part-results-table', '#part-result-count');
+
+    onSearchResults('#stock-results-table', '#stock-results-count');
 
     onSearchResults('#company-results-table', '#company-result-count');
     
@@ -137,6 +141,14 @@ InvenTree | {% trans "Search Results" %}
         }
     );
     
+    loadStockTable('#stock-results-table',
+        "{% url 'api-stock-list' %}",
+        {
+            params: {
+                search: "{{ query }}",
+            }
+        }
+    );
 
     loadCompanyTable('#company-results-table', "{% url 'api-company-list' %}", {
         params: {
