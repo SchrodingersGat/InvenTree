@@ -1,0 +1,80 @@
+{% extends "report/report_base.html" %}
+
+{% load i18n %}
+
+{% block header %}
+<h1>{% trans "Purchase Order" %} - PO-1234</h1>
+{% endblock %}
+
+{% block content %}
+<pdf:barcode value="Hello world!" type="code128" align="right"/>
+
+<hr>
+<img src='{{ part.image.url }}' height='10mm'>
+{{ part.full_name }}
+<hr>
+
+
+<table repeat="1">
+    <thead>
+        <tr>
+            <th width='50mm'>Item</th>
+            <th width='20mm'>Quantity</th>
+            <th>Price</th>
+        </tr>
+        {% for item in part.stock_items.all %}
+        <tr>
+            <td>{{ item }}</td>
+            <td>{{ item.quantity }}</td>
+            <td>{{ item.location }}</td>
+        </tr>
+        {% endfor %}
+        {% for item in part.stock_items.all %}
+        <tr>
+            <td>{{ item }}</td>
+            <td>{{ item.quantity }}</td>
+            <td>{{ item.location }}</td>
+        </tr>
+        {% endfor %}
+        <tr>
+            <td>Chair</td>
+            <td>3</td>
+            <td>$1.234</td>
+        </tr>
+    </thead>
+</table>
+
+HELLO?
+
+<table repeat="1">
+    <thead>
+        <tr>
+            <th width='50mm'>Item</th>
+            <th width='20mm'>Quantity</th>
+            <th>Price</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for item in part.stock_items.all %}
+        <tr>
+            <td>{{ item }}</td>
+            <td>{{ item.quantity }}</td>
+            <td>{{ item.location }}</td>
+        </tr>
+        {% endfor %}
+        {% for item in part.stock_items.all %}
+        <tr>
+            <td>{{ item }}</td>
+            <td>{{ item.quantity }}</td>
+            <td>{{ item.location }}</td>
+        </tr>
+        {% endfor %}
+        <tr>
+            <td>Chair</td>
+            <td>3</td>
+            <td>$1.234</td>
+        </tr>
+    </tbody>
+</table>
+
+{% endblock %}

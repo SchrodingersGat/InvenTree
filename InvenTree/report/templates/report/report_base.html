@@ -1,0 +1,35 @@
+{% load i18n %}
+{% load static %}
+<html>
+<head>
+    <style>
+{% block css %}
+    {% include "report/style_base.html" %}
+{% endblock %}
+    </style>
+</head>
+
+<body>
+
+<div id="header_content">
+{% block header %}
+HELLO HEADER
+{% endblock %}
+</div>
+
+
+<div id="footer_content">
+    {% block footer %}
+    Page <pdf:pagenumber> of <pdf:pagecount>
+    {% endblock %}
+</div>
+
+<div id='inventree_logo'>
+    <img src='{% static "img/inventree.png" %}' height='5mm'> 
+    {% trans "Powered by InvenTree" %}
+</div>
+    
+    {% block content %}
+    {% endblock %}
+</body>
+</html>

@@ -12,6 +12,9 @@ from django.conf.urls import url, include
 
 from . import views
 
+from report.views import PDFTestView
+
+
 part_related_urls = [
     url(r'^new/?', views.PartRelatedCreate.as_view(), name='part-related-create'),
     url(r'^(?P<pk>\d+)/delete/?', views.PartRelatedDelete.as_view(), name='part-related-delete'),
@@ -50,6 +53,8 @@ part_detail_urls = [
     url(r'^make-variant/', views.MakePartVariant.as_view(), name='make-part-variant'),
     url(r'^pricing/', views.PartPricing.as_view(), name='part-pricing'),
     
+    url(r'^pdf/', PDFTestView.as_view(), name='pdf-test'),
+
     url(r'^bom-upload/?', views.BomUpload.as_view(), name='upload-bom'),
     url(r'^bom-duplicate/?', views.BomDuplicate.as_view(), name='duplicate-bom'),
     

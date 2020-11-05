@@ -1,0 +1,49 @@
+@page {
+    size: a4 portrait;
+    margin: 2cm;
+
+    @frame header_frame {
+        -pdf-frame-border: 1;
+        -pdf-frame-content: header_content;
+        left: 15mm; 
+        width: 180mm;
+        top: 20mm;
+        height: 20mm;
+
+    }
+
+    @frame content_frame {
+        -pdf-frame-border: 1;
+        left: 15mm;
+        top: 40mm;
+        width: 180mm;
+        height: 217mm;
+    }
+
+    @frame footer_frame {
+        -pdf-frame-content: footer_content;
+        -pdf-frame-border: 1;
+        left: 15mm;
+        width: 180mm;
+        bottom: 20mm;
+        height: 20mm;
+    }
+
+    @frame logo_frame {
+        -pdf-frame-border: 1;
+        -pdf-frame-content: inventree_logo;
+        left: 15mm;
+        height: 5mm;
+        width: 180mm;
+        bottom: 15mm;
+    }
+}
+
+h1 {
+    font-size: 24pt;
+}
+
+table {
+    margin-left: 5mm;
+    margin-top: 15mm;
+}
