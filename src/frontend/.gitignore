@@ -29,3 +29,6 @@ dist-ssr
 /playwright/.cache/
 /.nyc_output/
 /coverage/
+
+# Sentry Config File
+.env.sentry-build-plugin
