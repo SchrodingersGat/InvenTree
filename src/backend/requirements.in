@@ -4,6 +4,7 @@ blessed                                 # CLI for Q Monitor
 cryptography>=44.0.0                    # Core cryptographic functionality
 django-anymail[amazon_ses,postal]       # Email backend for various providers
 django-allauth[mfa,socialaccount,saml,openid,headless]   # SSO for external providers via OpenID
+django-auditlog                         # Auditing / tracking of model changes
 django-cleanup                          # Automated deletion of old / unused uploaded files
 django-cors-headers                     # CORS headers extension for DRF
 django-dbbackup>=5.0.0                  # Backup / restore of database and media files
