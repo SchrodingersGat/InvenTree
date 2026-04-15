@@ -7,6 +7,7 @@ export const emptyServerAPI = {
   apiVersion: null,
   worker_running: null,
   worker_pending_tasks: null,
+  auditlog_enabled: null,
   plugins_enabled: null,
   plugins_install_disabled: null,
   active_plugins: [],

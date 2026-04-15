@@ -14,6 +14,7 @@ export interface ServerAPIProps {
   apiVersion: null | number;
   worker_running: null | boolean;
   worker_pending_tasks: null | number;
+  auditlog_enabled: null | boolean;
   plugins_enabled: null | boolean;
   plugins_install_disabled: null | boolean;
   active_plugins: PluginProps[];

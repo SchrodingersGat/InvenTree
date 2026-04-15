@@ -9,6 +9,8 @@
 export enum ApiEndpoints {
   api_server_info = '',
 
+  audit_log_list = 'auditlog/',
+
   // User API endpoints
   user_list = 'user/',
   user_set_password = 'user/:id/set-password/',
