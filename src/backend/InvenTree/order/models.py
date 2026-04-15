@@ -3164,10 +3164,9 @@ def update_order_on_lineitem_change(sender, instance, **kwargs):
     _touch_order_updated_at(instance)
 
 
-# Register models for audit history
-from auditlog.registry import auditlog
+from InvenTree.auditlog import register_auditlog
 
-auditlog.register(
+register_auditlog(
     PurchaseOrder,
     exclude_fields=[
         'lines',
@@ -3177,10 +3176,10 @@ auditlog.register(
         'updated_at',
     ],
 )
-auditlog.register(PurchaseOrderLineItem)
-auditlog.register(PurchaseOrderExtraLine)
+register_auditlog(PurchaseOrderLineItem)
+register_auditlog(PurchaseOrderExtraLine)
 
-auditlog.register(
+register_auditlog(
     ReturnOrder,
     exclude_fields=[
         'lines',
@@ -3190,10 +3189,10 @@ auditlog.register(
         'updated_at',
     ],
 )
-auditlog.register(ReturnOrderLineItem)
-auditlog.register(ReturnOrderExtraLine)
+register_auditlog(ReturnOrderLineItem)
+register_auditlog(ReturnOrderExtraLine)
 
-auditlog.register(
+register_auditlog(
     SalesOrder,
     exclude_fields=[
         'lines',
@@ -3203,6 +3202,6 @@ auditlog.register(
         'updated_at',
     ],
 )
-auditlog.register(SalesOrderLineItem)
-auditlog.register(SalesOrderExtraLine)
-auditlog.register(SalesOrderShipment)
+register_auditlog(SalesOrderLineItem)
+register_auditlog(SalesOrderExtraLine)
+register_auditlog(SalesOrderShipment)

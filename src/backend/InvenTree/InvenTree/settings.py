@@ -324,6 +324,7 @@ INSTALLED_APPS = [
     # Maintenance
     'maintenance_mode',
     # Third part add-ons
+    'auditlog',
     'django_filters',  # Extended filter functionality
     'rest_framework',  # DRF (Django Rest Framework)
     'corsheaders',  # Cross-origin Resource Sharing for DRF
@@ -391,7 +392,6 @@ AUDITLOG_ENABLED = get_boolean_setting(
 
 # django-auditlog configuration
 if AUDITLOG_ENABLED:  # pragma: no cover
-    INSTALLED_APPS.append('auditlog')
     MIDDLEWARE.append('auditlog.middleware.AuditlogMiddleware')
 
     AUDITLOG_STORE_JSON_CHANGES = True
