@@ -394,6 +394,10 @@ if INVENTREE_AUDITLOG_ENABLED:  # pragma: no cover
     INSTALLED_APPS.append('auditlog')
     MIDDLEWARE.append('auditlog.middleware.AuditlogMiddleware')
 
+    AUDITLOG_DISABLE_REMOTE_ADDR = get_boolean_setting(
+        'INVENTREE_AUDITLOG_DISABLE_REMOTE_ADDR', 'auditlog.disable_remote_addr', True
+    )
+
 # In DEBUG mode, add support for django-silk
 # Ref: https://silk.readthedocs.io/en/latest/
 DJANGO_SILK_ENABLED = DEBUG and get_boolean_setting(  # pragma: no cover
