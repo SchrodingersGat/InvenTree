@@ -384,6 +384,16 @@ MIDDLEWARE = CONFIG.get(
     ],
 )
 
+# Enable support for auditing
+INVENTREE_AUDITLOG_ENABLED = get_boolean_setting(
+    'INVENTREE_AUDITLOG_ENABLED', 'auditlog.enabled', False
+)
+
+# django-auditlog configuration
+if INVENTREE_AUDITLOG_ENABLED:  # pragma: no cover
+    INSTALLED_APPS.append('auditlog')
+    MIDDLEWARE.append('auditlog.middleware.AuditlogMiddleware')
+
 # In DEBUG mode, add support for django-silk
 # Ref: https://silk.readthedocs.io/en/latest/
 DJANGO_SILK_ENABLED = DEBUG and get_boolean_setting(  # pragma: no cover
