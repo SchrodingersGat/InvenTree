@@ -15,6 +15,7 @@ from django.utils.translation import gettext_lazy as _
 from django.views.decorators.cache import cache_control
 from django.views.decorators.csrf import csrf_exempt
 
+import auditlog.models
 import django_filters.rest_framework.filters as rest_filters
 import django_q.models
 import django_q.tasks
@@ -61,6 +62,7 @@ from InvenTree.helpers import inheritors, str2bool
 from InvenTree.helpers_api import (
     InvenTreeApiRouter,
     RetrieveDestroyModelViewSet,
+    RetrieveModelViewSet,
     RetrieveUpdateDestroyModelViewSet,
 )
 from InvenTree.helpers_email import send_email
@@ -1348,6 +1350,22 @@ class ObservabilityEnd(CreateAPI):
         return Response({'status': 'ok'})
 
 
+class AuditLogViewSet(RetrieveModelViewSet):
+    """Viewset for retrieving audit log entries."""
+
+    queryset = auditlog.models.LogEntry.objects.all().prefetch_related(
+        'actor', 'content_type'
+    )
+    serializer_class = common.serializers.AuditLogEntrySerializer
+    permission_classes = [IsAuthenticatedOrReadScope, IsAdminUser]
+
+    filter_backends = SEARCH_ORDER_FILTER
+    ordering = '-timestamp'
+    ordering_fields = ['timestamp', 'actor__username']
+    ordering_field_aliases = {'user': 'actor__username'}
+    search_fields = []
+
+
 selection_urls = [
     path(
         '<int:pk>/',
@@ -1563,8 +1581,24 @@ common_api_urls = [
             )
         ]),
     ),
-    # Router
-    path('', include(common_router.urls)),
 ]
+
+# If enabled, include the auditlog API endpoints
+if settings.INVENTREE_AUDITLOG_ENABLED:
+    common_api_urls.append(
+        path(
+            'auditlog/',
+            include([
+                path(
+                    '',
+                    AuditLogViewSet.as_view({'get': 'list'}),
+                    name='api-auditlog-list',
+                )
+            ]),
+        )
+    )
+
+
+common_api_urls.append(path('', include(common_router.urls)))
 
 admin_api_urls = admin_router.urls

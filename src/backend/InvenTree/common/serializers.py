@@ -5,6 +5,7 @@ from django.db.models import Count, OuterRef, Subquery
 from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 
+import auditlog.models
 import django_q.models
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema_field
@@ -1131,3 +1132,30 @@ class TestEmailSerializer(serializers.Serializer):
         fields = ['email']
 
     email = serializers.EmailField(required=True)
+
+
+class AuditLogEntrySerializer(InvenTreeModelSerializer):
+    """Serializer for the auditlog entry model."""
+
+    class Meta:
+        """Meta options for AuditLogEntrySerializer."""
+
+        model = auditlog.models.LogEntry
+        fields = [
+            'pk',
+            'timestamp',
+            'content_type',
+            'object_id',
+            'action',
+            'changes',
+            'user',
+        ]
+
+    user = serializers.PrimaryKeyRelatedField(source='actor', read_only=True)
+
+    user_detail = OptionalField(
+        serializer_class=UserSerializer,
+        serializer_kwargs={'source': 'user', 'read_only': True, 'many': False},
+        default_include=True,
+        prefetch_fields=['user'],
+    )

@@ -5,6 +5,12 @@ from rest_framework import mixins, routers, viewsets
 from InvenTree.api import BulkDeleteViewsetMixin
 
 
+class RetrieveModelViewSet(
+    mixins.RetrieveModelMixin, mixins.ListModelMixin, viewsets.GenericViewSet
+):
+    """Viewset which provides 'retrieve' and 'list' actions."""
+
+
 class RetrieveUpdateDestroyModelViewSet(
     mixins.RetrieveModelMixin,
     mixins.UpdateModelMixin,
