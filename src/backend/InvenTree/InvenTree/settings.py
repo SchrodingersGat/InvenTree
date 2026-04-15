@@ -394,6 +394,9 @@ if INVENTREE_AUDITLOG_ENABLED:  # pragma: no cover
     INSTALLED_APPS.append('auditlog')
     MIDDLEWARE.append('auditlog.middleware.AuditlogMiddleware')
 
+    AUDITLOG_STORE_JSON_CHANGES = True
+    AUDITLOG_USE_FK_STRING_REPRESENTATION = False
+
     AUDITLOG_DISABLE_REMOTE_ADDR = get_boolean_setting(
         'INVENTREE_AUDITLOG_DISABLE_REMOTE_ADDR', 'auditlog.disable_remote_addr', True
     )

@@ -3167,15 +3167,42 @@ def update_order_on_lineitem_change(sender, instance, **kwargs):
 # Register models for audit history
 from auditlog.registry import auditlog
 
-auditlog.register(PurchaseOrder, exclude_fields=['updated_at'])
+auditlog.register(
+    PurchaseOrder,
+    exclude_fields=[
+        'lines',
+        'extra_lines',
+        'parameters_list',
+        'metadata',
+        'updated_at',
+    ],
+)
 auditlog.register(PurchaseOrderLineItem)
 auditlog.register(PurchaseOrderExtraLine)
 
-auditlog.register(ReturnOrder, exclude_fields=['updated_at'])
+auditlog.register(
+    ReturnOrder,
+    exclude_fields=[
+        'lines',
+        'extra_lines',
+        'parameters_list',
+        'metadata',
+        'updated_at',
+    ],
+)
 auditlog.register(ReturnOrderLineItem)
 auditlog.register(ReturnOrderExtraLine)
 
-auditlog.register(SalesOrder, exclude_fields=['updated_at'])
+auditlog.register(
+    SalesOrder,
+    exclude_fields=[
+        'lines',
+        'extra_lines',
+        'parameters_list',
+        'metadata',
+        'updated_at',
+    ],
+)
 auditlog.register(SalesOrderLineItem)
 auditlog.register(SalesOrderExtraLine)
 auditlog.register(SalesOrderShipment)

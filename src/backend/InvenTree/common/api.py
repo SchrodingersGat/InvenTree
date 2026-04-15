@@ -1350,9 +1350,35 @@ class ObservabilityEnd(CreateAPI):
         return Response({'status': 'ok'})
 
 
+class AuditLogFilter(FilterSet):
+    """Filterset for the AuditLogViewSet."""
+
+    class Meta:
+        """Metaclass options."""
+
+        model = auditlog.models.LogEntry
+        fields = ['action', 'actor']
+
+    timestamp_after = rest_filters.DateTimeFilter(
+        field_name='timestamp', lookup_expr='gte'
+    )
+    timestamp_before = rest_filters.DateTimeFilter(
+        field_name='timestamp', lookup_expr='lte'
+    )
+
+    model_type = rest_filters.CharFilter(method='filter_model_type', label='Model Type')
+
+    def filter_model_type(self, queryset, name, value):
+        """Filter queryset to include only Parameters of the given model type."""
+        return common.filters.filter_content_type(
+            queryset, 'content_type', value, allow_null=False
+        )
+
+
 class AuditLogViewSet(RetrieveModelViewSet):
     """Viewset for retrieving audit log entries."""
 
+    filterset_class = AuditLogFilter
     queryset = auditlog.models.LogEntry.objects.all().prefetch_related(
         'actor', 'content_type'
     )
