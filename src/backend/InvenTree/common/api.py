@@ -1366,6 +1366,8 @@ class AuditLogFilter(FilterSet):
         field_name='timestamp', lookup_expr='lte'
     )
 
+    model_id = rest_filters.NumberFilter(field_name='object_id', label='Model ID')
+
     model_type = rest_filters.CharFilter(method='filter_model_type', label='Model Type')
 
     def filter_model_type(self, queryset, name, value):

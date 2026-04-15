@@ -1149,13 +1149,9 @@ class AuditLogEntrySerializer(InvenTreeModelSerializer):
             'action',
             'changes',
             'user',
+            'user_detail',
         ]
 
     user = serializers.PrimaryKeyRelatedField(source='actor', read_only=True)
 
-    user_detail = OptionalField(
-        serializer_class=UserSerializer,
-        serializer_kwargs={'source': 'user', 'read_only': True, 'many': False},
-        default_include=True,
-        prefetch_fields=['user'],
-    )
+    user_detail = UserSerializer(source='actor', read_only=True, many=False)
