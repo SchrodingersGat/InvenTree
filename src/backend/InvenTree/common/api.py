@@ -1610,7 +1610,7 @@ common_api_urls = [
 ]
 
 # If enabled, include the auditlog API endpoints
-if settings.INVENTREE_AUDITLOG_ENABLED:
+if settings.AUDITLOG_ENABLED:
     common_api_urls.append(
         path(
             'auditlog/',

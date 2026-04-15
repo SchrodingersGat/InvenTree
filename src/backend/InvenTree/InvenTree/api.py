@@ -247,6 +247,7 @@ class InfoApiSerializer(serializers.Serializer):
     worker_running = serializers.BooleanField(read_only=True)
     worker_count = serializers.IntegerField(read_only=True)
     worker_pending_tasks = serializers.IntegerField(read_only=True)
+    auditlog_enabled = serializers.BooleanField(read_only=True)
     plugins_enabled = serializers.BooleanField(read_only=True)
     plugins_install_disabled = serializers.BooleanField(read_only=True)
     active_plugins = serializers.JSONField(read_only=True)
@@ -299,6 +300,7 @@ class InfoView(APIView):
             'worker_running': is_worker_running(),
             'worker_count': settings.BACKGROUND_WORKER_COUNT,
             'worker_pending_tasks': self.worker_pending_tasks(),
+            'auditlog_enabled': settings.AUDITLOG_ENABLED,
             'plugins_enabled': settings.PLUGINS_ENABLED,
             'plugins_install_disabled': settings.PLUGINS_INSTALL_DISABLED,
             'email_configured': is_email_configured(),

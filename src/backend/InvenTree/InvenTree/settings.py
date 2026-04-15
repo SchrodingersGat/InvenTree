@@ -385,12 +385,12 @@ MIDDLEWARE = CONFIG.get(
 )
 
 # Enable support for auditing
-INVENTREE_AUDITLOG_ENABLED = get_boolean_setting(
+AUDITLOG_ENABLED = get_boolean_setting(
     'INVENTREE_AUDITLOG_ENABLED', 'auditlog.enabled', False
 )
 
 # django-auditlog configuration
-if INVENTREE_AUDITLOG_ENABLED:  # pragma: no cover
+if AUDITLOG_ENABLED:  # pragma: no cover
     INSTALLED_APPS.append('auditlog')
     MIDDLEWARE.append('auditlog.middleware.AuditlogMiddleware')
 
