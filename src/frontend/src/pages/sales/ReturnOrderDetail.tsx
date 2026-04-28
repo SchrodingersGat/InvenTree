@@ -29,6 +29,7 @@ import { StylishText } from '../../components/items/StylishText';
 import InstanceDetail from '../../components/nav/InstanceDetail';
 import { PageDetail } from '../../components/nav/PageDetail';
 import AttachmentPanel from '../../components/panels/AttachmentPanel';
+import HistoryPanel from '../../components/panels/HistoryPanel';
 import NotesPanel from '../../components/panels/NotesPanel';
 import type { PanelType } from '../../components/panels/Panel';
 import { PanelGroup } from '../../components/panels/PanelGroup';
@@ -376,6 +377,10 @@ export default function ReturnOrderDetail() {
         model_type: ModelType.returnorder,
         model_id: order.pk,
         has_note: !!order.notes
+      }),
+      HistoryPanel({
+        model_type: ModelType.returnorder,
+        model_id: order.pk
       })
     ];
   }, [order, id, user]);

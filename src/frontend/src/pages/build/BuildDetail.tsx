@@ -43,6 +43,7 @@ import {
 import InstanceDetail from '../../components/nav/InstanceDetail';
 import { PageDetail } from '../../components/nav/PageDetail';
 import AttachmentPanel from '../../components/panels/AttachmentPanel';
+import HistoryPanel from '../../components/panels/HistoryPanel';
 import NotesPanel from '../../components/panels/NotesPanel';
 import type { PanelType } from '../../components/panels/Panel';
 import { PanelGroup } from '../../components/panels/PanelGroup';
@@ -570,6 +571,10 @@ export default function BuildDetail() {
         model_type: ModelType.build,
         model_id: build.pk,
         has_note: !!build.notes
+      }),
+      HistoryPanel({
+        model_type: ModelType.build,
+        model_id: build.pk
       })
     ];
   }, [

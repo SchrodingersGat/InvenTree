@@ -30,7 +30,27 @@ export default function HistoryTable({
         accessor: 'user_detail',
         sortable: true,
         switchable: true
-      })
+      }),
+      {
+        accessor: 'action',
+        title: t`Action`,
+        sortable: true,
+        switchable: true,
+        render: (record: any) => {
+          // TODO
+          return '-';
+        }
+      },
+      {
+        accessor: 'changes',
+        title: t`Changes`,
+        sortable: false,
+        switchable: false,
+        render: (record: any) => {
+          // TODO
+          return '-';
+        }
+      }
     ];
   }, []);
 
