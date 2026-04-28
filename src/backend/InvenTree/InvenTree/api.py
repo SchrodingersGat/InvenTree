@@ -298,7 +298,7 @@ class InfoView(APIView):
             'instance': InvenTree.version.inventreeInstanceName(),
             'apiVersion': InvenTree.version.inventreeApiVersion(),
             'worker_running': is_worker_running(),
-            'worker_count': settings.BACKGROUND_WORKER_COUNT,
+            'worker_count': settings.Q_CLUSTER['workers'],
             'worker_pending_tasks': self.worker_pending_tasks(),
             'auditlog_enabled': settings.AUDITLOG_ENABLED,
             'plugins_enabled': settings.PLUGINS_ENABLED,
