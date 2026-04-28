@@ -7,6 +7,7 @@ import {
   Divider,
   Drawer,
   Group,
+  NumberInput,
   Paper,
   Select,
   Space,
@@ -178,6 +179,19 @@ function FilterElement({
           label={t`Value`}
           placeholder={t`Select date value`}
           onChange={setDateValue}
+        />
+      );
+    case 'number':
+      return (
+        <NumberInput
+          label={t`Value`}
+          placeholder={t`Enter filter value`}
+          onChange={(value) => setTextValue(value ? value.toString() : '')}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              onValueChange(textValue);
+            }
+          }}
         />
       );
     case 'choice':

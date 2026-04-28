@@ -17,7 +17,13 @@ export type TableFilterChoice = {
  * text: A filter which allows raw text input
  * api: A filter which fetches its options from an API endpoint
  */
-export type TableFilterType = 'boolean' | 'choice' | 'date' | 'text' | 'api';
+export type TableFilterType =
+  | 'boolean'
+  | 'choice'
+  | 'date'
+  | 'text'
+  | 'api'
+  | 'number';
 
 /**
  * Interface for the table filter type. Provides a number of options for selecting filter value:
