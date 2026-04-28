@@ -70,7 +70,16 @@ export default function HistoryTable({
   modelType?: ModelType;
   modelId?: number;
 }>) {
-  const table = useTable('history');
+  const tableKey = useMemo(() => {
+    if (modelType && modelId) {
+      return 'history-model';
+    } else {
+      // Global history view
+      return 'history-global';
+    }
+  }, [modelType, modelId]);
+
+  const table = useTable(tableKey);
 
   const tableColumns: TableColumn[] = useMemo(() => {
     return [
@@ -125,9 +134,17 @@ export default function HistoryTable({
         name: 'actor',
         label: t`User`,
         description: t`Filter by user who made the change`
-      })
+      }),
+      {
+        name: 'model_id',
+        label: t`Model ID`,
+        description: t`Filter by model ID`,
+        type: 'number',
+        active: !modelId
+      }
+      // TODO: Add a filter for ContentType / model type
     ];
-  }, []);
+  }, [modelId]);
 
   return (
     <InvenTreeTable
