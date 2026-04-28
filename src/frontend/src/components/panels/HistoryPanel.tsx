@@ -1,5 +1,5 @@
 import type { ModelType } from '@lib/enums/ModelType';
-import { IconHistory } from '@tabler/icons-react';
+import { IconReport } from '@tabler/icons-react';
 import { useServerApiState } from '../../states/ServerApiState';
 import { useUserState } from '../../states/UserState';
 import HistoryTable from '../../tables/general/HistoryTable';
@@ -18,7 +18,7 @@ export default function HistoryPanel({
   return {
     name: 'history',
     label: 'History',
-    icon: <IconHistory />,
+    icon: <IconReport />,
     hidden: !user.isStaff() || !server?.auditlog_enabled,
     content: <HistoryTable modelType={model_type} modelId={model_id} />
   };

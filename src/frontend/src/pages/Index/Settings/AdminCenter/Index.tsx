@@ -34,7 +34,9 @@ import type {
 import { PanelGroup } from '../../../../components/panels/PanelGroup';
 import { GlobalSettingList } from '../../../../components/settings/SettingList';
 import { Loadable } from '../../../../functions/loading';
+import { useServerApiState } from '../../../../states/ServerApiState';
 import { useUserState } from '../../../../states/UserState';
+import HistoryTable from '../../../../tables/general/HistoryTable';
 
 const ReportTemplatePanel = Loadable(
   lazy(() => import('./ReportTemplatePanel'))
@@ -109,6 +111,8 @@ const LocationTypesTable = Loadable(
 export default function AdminCenter() {
   const user = useUserState();
 
+  const { server } = useServerApiState.getState();
+
   const adminCenterPanels: PanelType[] = useMemo(() => {
     return [
       {
@@ -124,6 +128,13 @@ export default function AdminCenter() {
         icon: <IconUsersGroup />,
         content: <UserManagementPanel />,
         hidden: !user.hasViewRole(UserRoles.admin)
+      },
+      {
+        name: 'auditlog',
+        label: t`Audit Log`,
+        icon: <IconReport />,
+        content: <HistoryTable />,
+        hidden: !user.isStaff() || !server?.auditlog_enabled
       },
       {
         name: 'email',
@@ -239,7 +250,8 @@ export default function AdminCenter() {
         hidden: !user.hasViewRole(UserRoles.admin)
       }
     ];
-  }, [user]);
+  }, [user, server]);
+
   const grouping: PanelGroupType[] = useMemo(() => {
     return [
       { id: 'home', label: '', panelIDs: ['home'] },
@@ -248,6 +260,7 @@ export default function AdminCenter() {
         label: t`Operations`,
         panelIDs: [
           'user',
+          'auditlog',
           'barcode-history',
           'background',
           'errors',

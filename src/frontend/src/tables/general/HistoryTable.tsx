@@ -23,8 +23,14 @@ function ChangeGroup({
   const action = record.action ?? null;
   const changes = record.changes ?? {};
 
+  // TODO: Use an enum here
   if (action === 0) {
     return <Badge color='green'>{t`Item Created`}</Badge>;
+  }
+
+  // TODO: Use an enum here
+  if (action === 2) {
+    return <Badge color='red'>{t`Item Deleted`}</Badge>;
   }
 
   return (
@@ -32,8 +38,8 @@ function ChangeGroup({
       <Table.Tbody>
         {Object.keys(changes).map((field) => {
           const change = changes[field];
-          const oldValue = change[0] ?? null;
-          const newValue = change[1] ?? null;
+          const oldValue = change?.[0] ?? null;
+          const newValue = change?.[1] ?? null;
 
           return (
             <Table.Tr key={field}>
@@ -61,13 +67,23 @@ export default function HistoryTable({
   modelType,
   modelId
 }: Readonly<{
-  modelType: ModelType;
-  modelId: number;
+  modelType?: ModelType;
+  modelId?: number;
 }>) {
   const table = useTable('history');
 
   const tableColumns: TableColumn[] = useMemo(() => {
     return [
+      {
+        accessor: 'content_type',
+        title: t`Model`,
+        sortable: true
+      },
+      {
+        accessor: 'object_id',
+        title: t`Object ID`,
+        sortable: true
+      },
       {
         accessor: 'timestamp',
         title: t`Timestamp`,
@@ -88,7 +104,7 @@ export default function HistoryTable({
         switchable: true,
         render: (record: any) => {
           // TODO
-          return '-';
+          return record.action;
         }
       },
       {
