@@ -2121,3 +2121,8 @@ class BuildItem(InvenTree.models.InvenTreeMetadataModel):
         help_text=_('Destination stock item'),
         limit_choices_to={'is_building': True},
     )
+
+
+from InvenTree.auditlog import register_auditlog
+
+register_auditlog(Build, exclude_fields=['build_lines'])
