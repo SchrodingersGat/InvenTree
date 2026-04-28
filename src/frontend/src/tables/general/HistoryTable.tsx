@@ -4,6 +4,7 @@ import {
   ApiEndpoints,
   type TableColumn,
   type TableFilter,
+  type TableFilterChoice,
   apiUrl
 } from '@lib/index';
 import { t } from '@lingui/core/macro';
@@ -14,6 +15,12 @@ import { formatDate } from '../../defaults/formatters';
 import { UserColumn } from '../ColumnRenderers';
 import { UserFilter } from '../Filter';
 import { InvenTreeTable } from '../InvenTreeTable';
+
+enum HistoryActionType {
+  CREATE = 0,
+  UPDATE = 1,
+  DELETE = 2
+}
 
 function ChangeGroup({
   record
@@ -81,17 +88,22 @@ export default function HistoryTable({
 
   const table = useTable(tableKey);
 
+  const actionChoices: TableFilterChoice[] = useMemo(() => {
+    return [
+      { value: HistoryActionType.CREATE.toString(), label: t`Create` },
+      { value: HistoryActionType.UPDATE.toString(), label: t`Update` },
+      { value: HistoryActionType.DELETE.toString(), label: t`Delete` }
+    ];
+  }, []);
+
   const tableColumns: TableColumn[] = useMemo(() => {
     return [
       {
         accessor: 'content_type',
         title: t`Model`,
         sortable: true
-      },
-      {
-        accessor: 'object_id',
-        title: t`Object ID`,
-        sortable: true
+        // TODO: Render the model type here
+        // TODO: Render the model ID here
       },
       {
         accessor: 'timestamp',
@@ -106,16 +118,6 @@ export default function HistoryTable({
         sortable: true,
         switchable: true
       }),
-      {
-        accessor: 'action',
-        title: t`Action`,
-        sortable: true,
-        switchable: true,
-        render: (record: any) => {
-          // TODO
-          return record.action;
-        }
-      },
       {
         accessor: 'changes',
         title: t`Changes`,
@@ -136,6 +138,13 @@ export default function HistoryTable({
         description: t`Filter by user who made the change`
       }),
       {
+        name: 'action',
+        label: t`Action`,
+        description: t`Filter by type of change`,
+        type: 'choice',
+        choices: actionChoices
+      },
+      {
         name: 'model_id',
         label: t`Model ID`,
         description: t`Filter by model ID`,
@@ -144,7 +153,7 @@ export default function HistoryTable({
       }
       // TODO: Add a filter for ContentType / model type
     ];
-  }, [modelId]);
+  }, [actionChoices, modelId]);
 
   return (
     <InvenTreeTable
