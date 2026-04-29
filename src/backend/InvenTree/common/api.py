@@ -85,6 +85,7 @@ from InvenTree.permissions import (
     UserSettingsPermissionsOrScope,
 )
 from InvenTree.serializers import EmptySerializer
+from plugin import registry as plugin_registry
 
 admin_router = InvenTreeApiRouter()
 common_router = InvenTreeApiRouter()
@@ -674,10 +675,34 @@ class FlagDetail(RetrieveAPI):
         return {key: value}
 
 
+class ContentTypeFilter(FilterSet):
+    """Filterset for the ContentType API endpoint."""
+
+    class Meta:
+        """Metaclass options."""
+
+        model = ContentType
+        fields = ['app_label']
+
+    is_plugin = rest_filters.BooleanFilter(
+        label=_('Is Plugin'), method='filter_is_plugin'
+    )
+
+    def filter_is_plugin(self, queryset, name, value):
+        """Filter ContentTypes based on whether they are part of a plugin or not."""
+        plugin_apps = plugin_registry.installed_apps()
+
+        if value:
+            return queryset.filter(app_label__in=plugin_apps)
+        else:
+            return queryset.exclude(app_label__in=plugin_apps)
+
+
 class ContentTypeList(ListAPI):
     """List view for ContentTypes."""
 
     queryset = ContentType.objects.all()
+    filterset_class = ContentTypeFilter
     serializer_class = common.serializers.ContentTypeSerializer
     permission_classes = [IsAuthenticatedOrReadScope]
     filter_backends = SEARCH_ORDER_FILTER
