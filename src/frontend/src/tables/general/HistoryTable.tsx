@@ -103,7 +103,7 @@ export default function HistoryTable({
   // Fetch available ContentType options for filtering / rendering
   const contentTypes = useQuery({
     queryKey: ['auditable-content-types'],
-    enabled: !modelType || !modelId, // Only fetch if we're in the global history view
+    // enabled: !modelType || !modelId, // Only fetch if we're in the global history view
     queryFn: async () => {
       return api
         .get(apiUrl(ApiEndpoints.content_type_list), {
@@ -117,11 +117,6 @@ export default function HistoryTable({
 
   // Generate a list of available model options for filtering
   const contentTypeOptions: TableFilterChoice[] = useMemo(() => {
-    // Ignore if we're already filtering by a specific model type / ID
-    if (!!modelType && !!modelId) {
-      return [];
-    }
-
     return (
       (contentTypes?.data ?? []).map((ct: any) => {
         return {
@@ -157,6 +152,7 @@ export default function HistoryTable({
         accessor: 'content_type',
         title: t`Model`,
         sortable: true,
+        hidden: !!modelType,
         render: (record: any) => {
           // Lookup the appropriate content type for this record
           const ct = contentTypeOptions.find(
@@ -196,7 +192,7 @@ export default function HistoryTable({
         }
       }
     ];
-  }, [contentTypeOptions]);
+  }, [modelType, modelId, contentTypeOptions]);
 
   const tableFilters: TableFilter[] = useMemo(() => {
     return [
