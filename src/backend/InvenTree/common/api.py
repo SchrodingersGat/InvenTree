@@ -697,6 +697,21 @@ class ContentTypeFilter(FilterSet):
         else:
             return queryset.exclude(app_label__in=plugin_apps)
 
+    auditable = rest_filters.BooleanFilter(
+        label=_('Auditable'), method='filter_auditable'
+    )
+
+    def filter_auditable(self, queryset, name, value):
+        """Filter ContentTypes based on whether they are registered for auditing or not."""
+        from InvenTree.auditlog import auditable_content_types
+
+        auditable_content_types = [ct.pk for ct in auditable_content_types()]
+
+        if value:
+            return queryset.filter(pk__in=auditable_content_types)
+        else:
+            return queryset.exclude(pk__in=auditable_content_types)
+
 
 class ContentTypeList(ListAPI):
     """List view for ContentTypes."""
