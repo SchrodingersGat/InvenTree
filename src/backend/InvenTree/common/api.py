@@ -4,6 +4,7 @@ import json
 import json.decoder
 
 from django.conf import settings
+from django.contrib.auth.models import Group
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import FieldDoesNotExist, ValidationError
 from django.db.models import Q
@@ -1399,16 +1400,23 @@ class AuditLogFilter(FilterSet):
         model = auditlog.models.LogEntry
         fields = ['action', 'actor', 'content_type']
 
+    group = rest_filters.ModelChoiceFilter(
+        field_name='actor__groups', queryset=Group.objects.all(), label=_('User Group')
+    )
+
     timestamp_after = rest_filters.DateTimeFilter(
         field_name='timestamp', lookup_expr='gte'
     )
+
     timestamp_before = rest_filters.DateTimeFilter(
         field_name='timestamp', lookup_expr='lte'
     )
 
-    model_id = rest_filters.NumberFilter(field_name='object_id', label='Model ID')
+    model_id = rest_filters.NumberFilter(field_name='object_id', label=_('Model ID'))
 
-    model_type = rest_filters.CharFilter(method='filter_model_type', label='Model Type')
+    model_type = rest_filters.CharFilter(
+        method='filter_model_type', label=_('Model Type')
+    )
 
     def filter_model_type(self, queryset, name, value):
         """Filter queryset to include only Parameters of the given model type."""

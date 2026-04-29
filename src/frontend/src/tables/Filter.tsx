@@ -401,6 +401,26 @@ export function UserFilter({
   };
 }
 
+export function GroupFilter({
+  name,
+  label,
+  description
+}: {
+  name?: string;
+  label?: string;
+  description?: string;
+}): TableFilter {
+  return {
+    name: name ?? 'group',
+    label: label ?? t`Group`,
+    description: description ?? t`Filter by group`,
+    type: 'api',
+    apiUrl: apiUrl(ApiEndpoints.group_list),
+    model: ModelType.group,
+    modelRenderer: (instance: any) => instance.name
+  };
+}
+
 export function ManufacturerFilter(): TableFilter {
   return {
     name: 'manufacturer',

@@ -15,7 +15,7 @@ import { useMemo } from 'react';
 import { useApi } from '../../contexts/ApiContext';
 import { formatDate } from '../../defaults/formatters';
 import { UserColumn } from '../ColumnRenderers';
-import { UserFilter } from '../Filter';
+import { GroupFilter, UserFilter } from '../Filter';
 import { InvenTreeTable } from '../InvenTreeTable';
 
 enum HistoryActionType {
@@ -201,6 +201,7 @@ export default function HistoryTable({
         label: t`User`,
         description: t`Filter by user who made the change`
       }),
+      GroupFilter({}),
       {
         name: 'action',
         label: t`Action`,
