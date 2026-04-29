@@ -1,19 +1,23 @@
-import type { ModelType } from '@lib/enums/ModelType';
+import { ModelType } from '@lib/enums/ModelType';
 import useTable from '@lib/hooks/UseTable';
 import {
   ApiEndpoints,
   type TableColumn,
   type TableFilter,
   type TableFilterChoice,
-  apiUrl
+  apiUrl,
+  getDetailUrl,
+  navigateToLink
 } from '@lib/index';
 import { t } from '@lingui/core/macro';
-import { Badge, Group, Table, Text } from '@mantine/core';
-import { IconArrowRight } from '@tabler/icons-react';
+import { ActionIcon, Anchor, Badge, Group, Table, Text } from '@mantine/core';
+import { IconArrowRight, IconLink } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useApi } from '../../contexts/ApiContext';
 import { formatDate } from '../../defaults/formatters';
+import { useUserState } from '../../states/UserState';
 import { UserColumn } from '../ColumnRenderers';
 import { GroupFilter, UserFilter } from '../Filter';
 import { InvenTreeTable } from '../InvenTreeTable';
@@ -32,13 +36,11 @@ function ChangeGroup({
   const action = record.action ?? null;
   const changes = record.changes ?? {};
 
-  // TODO: Use an enum here
-  if (action === 0) {
+  if (action === HistoryActionType.CREATE) {
     return <Badge color='green'>{t`Item Created`}</Badge>;
   }
 
-  // TODO: Use an enum here
-  if (action === 2) {
+  if (action === HistoryActionType.DELETE) {
     return <Badge color='red'>{t`Item Deleted`}</Badge>;
   }
 
@@ -80,6 +82,8 @@ export default function HistoryTable({
   modelId?: number;
 }>) {
   const api = useApi();
+  const navigate = useNavigate();
+  const user = useUserState();
 
   const tableKey = useMemo(() => {
     if (modelType && modelId) {
@@ -121,7 +125,8 @@ export default function HistoryTable({
       (contentTypes?.data ?? []).map((ct: any) => {
         return {
           value: ct.pk.toString(),
-          label: ct.app_labeled_name
+          label: ct.app_labeled_name,
+          model: ct.model
         };
       }) ?? []
     );
@@ -159,12 +164,43 @@ export default function HistoryTable({
             (ct) => ct.value === record.content_type.toString()
           );
 
+          let modelType: ModelType | null = null;
+          let modelUrl = null;
+
+          // Find the matching model information
+          if (Object.values(ModelType).includes((ct as any)?.model)) {
+            modelType = (ct as any)?.model as ModelType;
+
+            if (user.hasViewPermission(modelType)) {
+              modelUrl = getDetailUrl(modelType, record.object_id);
+            }
+          }
+
           return (
             <Group justify='space-between'>
               <Text size='sm'>{ct?.label ?? record.content_type}</Text>
-              <Badge size='xs'>
-                {t`ID`}: {record.object_id}
-              </Badge>
+              <Group justify='right' gap='xs' wrap='nowrap'>
+                <Badge size='xs'>
+                  {t`ID`}: {record.object_id}
+                </Badge>
+                {modelUrl && (
+                  <Anchor
+                    href='{modelUrl}'
+                    target='_blank'
+                    rel='noopener noreferrer'
+                  >
+                    <ActionIcon
+                      size='sm'
+                      variant='transparent'
+                      onClick={(e) => {
+                        navigateToLink(modelUrl, navigate, e);
+                      }}
+                    >
+                      <IconLink />
+                    </ActionIcon>
+                  </Anchor>
+                )}
+              </Group>
             </Group>
           );
         }
@@ -192,7 +228,7 @@ export default function HistoryTable({
         }
       }
     ];
-  }, [modelType, modelId, contentTypeOptions]);
+  }, [modelType, modelId, contentTypeOptions, user]);
 
   const tableFilters: TableFilter[] = useMemo(() => {
     return [
