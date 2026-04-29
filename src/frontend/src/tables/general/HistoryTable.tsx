@@ -230,6 +230,18 @@ export default function HistoryTable({
         type: 'choice',
         choices: appLabelOptions,
         active: appLabelOptions.length > 0
+      },
+      {
+        name: 'timestamp_before',
+        label: t`Before`,
+        description: t`Filter changes made before a certain date`,
+        type: 'date'
+      },
+      {
+        name: 'timestamp_after',
+        label: t`After`,
+        description: t`Filter changes made after a certain date`,
+        type: 'date'
       }
     ];
   }, [actionChoices, contentTypeOptions, appLabelOptions, modelId]);
