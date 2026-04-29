@@ -10,7 +10,9 @@ import {
 import { t } from '@lingui/core/macro';
 import { Badge, Group, Table, Text } from '@mantine/core';
 import { IconArrowRight } from '@tabler/icons-react';
+import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
+import { useApi } from '../../contexts/ApiContext';
 import { formatDate } from '../../defaults/formatters';
 import { UserColumn } from '../ColumnRenderers';
 import { UserFilter } from '../Filter';
@@ -77,6 +79,8 @@ export default function HistoryTable({
   modelType?: ModelType;
   modelId?: number;
 }>) {
+  const api = useApi();
+
   const tableKey = useMemo(() => {
     if (modelType && modelId) {
       return 'history-model';
@@ -96,14 +100,78 @@ export default function HistoryTable({
     ];
   }, []);
 
+  // Fetch available ContentType options for filtering / rendering
+  const contentTypes = useQuery({
+    queryKey: ['auditable-content-types'],
+    enabled: !modelType || !modelId, // Only fetch if we're in the global history view
+    queryFn: async () => {
+      return api
+        .get(apiUrl(ApiEndpoints.content_type_list), {
+          params: {
+            auditable: true
+          }
+        })
+        .then((res) => res.data);
+    }
+  });
+
+  // Generate a list of available model options for filtering
+  const contentTypeOptions: TableFilterChoice[] = useMemo(() => {
+    // Ignore if we're already filtering by a specific model type / ID
+    if (!!modelType && !!modelId) {
+      return [];
+    }
+
+    return (
+      (contentTypes?.data ?? []).map((ct: any) => {
+        return {
+          value: ct.pk.toString(),
+          label: ct.app_labeled_name
+        };
+      }) ?? []
+    );
+  }, [modelType, modelId, contentTypes.data]);
+
+  // Generate a list of available app_label options for filtering
+  const appLabelOptions: TableFilterChoice[] = useMemo(() => {
+    // Ignore if we're already filtering by a specific model type / ID
+    if (!!modelType && !!modelId) {
+      return [];
+    }
+
+    const appLabels = new Set(
+      (contentTypes?.data ?? []).map((ct: any) => ct.app_label)
+    );
+
+    return Array.from(appLabels).map((appLabel) => {
+      return {
+        value: `${appLabel}`,
+        label: `${appLabel}`
+      };
+    });
+  }, [modelType, modelId, contentTypes.data]);
+
   const tableColumns: TableColumn[] = useMemo(() => {
     return [
       {
         accessor: 'content_type',
         title: t`Model`,
-        sortable: true
-        // TODO: Render the model type here
-        // TODO: Render the model ID here
+        sortable: true,
+        render: (record: any) => {
+          // Lookup the appropriate content type for this record
+          const ct = contentTypeOptions.find(
+            (ct) => ct.value === record.content_type.toString()
+          );
+
+          return (
+            <Group justify='space-between'>
+              <Text size='sm'>{ct?.label ?? record.content_type}</Text>
+              <Badge size='xs'>
+                {t`ID`}: {record.object_id}
+              </Badge>
+            </Group>
+          );
+        }
       },
       {
         accessor: 'timestamp',
@@ -128,7 +196,7 @@ export default function HistoryTable({
         }
       }
     ];
-  }, []);
+  }, [contentTypeOptions]);
 
   const tableFilters: TableFilter[] = useMemo(() => {
     return [
@@ -150,10 +218,25 @@ export default function HistoryTable({
         description: t`Filter by model ID`,
         type: 'number',
         active: !modelId
+      },
+      {
+        name: 'content_type',
+        label: t`Model Type`,
+        description: t`Filter by model type`,
+        type: 'choice',
+        choices: contentTypeOptions,
+        active: contentTypeOptions.length > 0
+      },
+      {
+        name: 'app_label',
+        label: t`App Label`,
+        description: t`Filter by app label`,
+        type: 'choice',
+        choices: appLabelOptions,
+        active: appLabelOptions.length > 0
       }
-      // TODO: Add a filter for ContentType / model type
     ];
-  }, [actionChoices, modelId]);
+  }, [actionChoices, contentTypeOptions, appLabelOptions, modelId]);
 
   return (
     <InvenTreeTable

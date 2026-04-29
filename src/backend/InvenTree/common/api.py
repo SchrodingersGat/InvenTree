@@ -1397,7 +1397,7 @@ class AuditLogFilter(FilterSet):
         """Metaclass options."""
 
         model = auditlog.models.LogEntry
-        fields = ['action', 'actor']
+        fields = ['action', 'actor', 'content_type']
 
     timestamp_after = rest_filters.DateTimeFilter(
         field_name='timestamp', lookup_expr='gte'
