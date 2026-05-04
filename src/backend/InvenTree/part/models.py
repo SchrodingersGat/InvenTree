@@ -1300,26 +1300,6 @@ class Part(
         help_text=_('Is the BOM for this part valid?'),
     )
 
-    bom_checksum = models.CharField(
-        max_length=128,
-        blank=True,
-        verbose_name=_('BOM checksum'),
-        help_text=_('Stored BOM checksum'),
-    )
-
-    bom_checked_by = models.ForeignKey(
-        User,
-        on_delete=models.SET_NULL,
-        blank=True,
-        null=True,
-        verbose_name=_('BOM checked by'),
-        related_name='boms_checked',
-    )
-
-    bom_checked_date = models.DateField(
-        blank=True, null=True, verbose_name=_('BOM checked date')
-    )
-
     creation_date = models.DateField(
         auto_now_add=True,
         editable=False,
