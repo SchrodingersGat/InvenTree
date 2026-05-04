@@ -4401,6 +4401,48 @@ class BomItemSubstitute(InvenTree.models.InvenTreeMetadataModel):
     )
 
 
+class BomValidation(models.Model):
+    """Model representing a single "validation" of an assembly BOM.
+
+    When a BOM is validated, a snapshot of the current BOM is taken, and stored as a set of BomValidationItem entries.
+    """
+
+    part = models.ForeignKey(
+        Part,
+        on_delete=models.CASCADE,
+        related_name='bom_validations',
+        verbose_name=_('Part'),
+        help_text=_('Part assembly for this BOM validation entry'),
+    )
+
+    entries = models.JSONField(
+        blank=True,
+        null=True,
+        verbose_name=_('BOM entries'),
+        help_text=_('Snapshot of the BOM entries at the time of validation'),
+    )
+
+    checksum = models.CharField(
+        max_length=128,
+        blank=True,
+        verbose_name=_('BOM checksum'),
+        help_text=_('Stored BOM checksum'),
+    )
+
+    checked_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        verbose_name=_('BOM checked by'),
+        related_name='bom_validations',
+    )
+
+    checked_date = models.DateField(
+        blank=True, null=True, verbose_name=_('BOM checked date')
+    )
+
+
 class PartRelated(InvenTree.models.InvenTreeMetadataModel):
     """Store and handle related parts (eg. mating connector, crimps, etc.)."""
 
