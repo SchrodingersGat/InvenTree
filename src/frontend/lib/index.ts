@@ -132,6 +132,13 @@ export {
   type TableStateExtraProps
 } from './hooks/UseTable';
 
+export {
+  type DrawerProps,
+  DetailDrawer,
+  DetailDrawerLink
+} from './components/nav/DetailDrawer';
+export { StylishText } from './components/StylishText';
+
 // State management
 export {
   type StoredTableStateProps,
