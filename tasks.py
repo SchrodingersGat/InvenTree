@@ -1844,26 +1844,28 @@ def _detect_ci_branch() -> Optional[str]:
 
     info('Running in GitHub Actions environment - detecting target branch')
 
-    info('DEBUG INFORMATION:')
-
-    for a in [
-        'GITHUB_EVENT_NAME',
-        'GITHUB_REF_NAME',
-        'GITHUB_REF_TYPE',
-        'GITHUB_BASE_REF',
-        'GITHUB_REF',
-        'GITHUB_HEAD_REF',
-    ]:
-        info(f'{a}: ' + str(os.environ.get(a)))
-
     if os.environ.get('GITHUB_EVENT_NAME') == 'pull_request':
         return os.environ.get('GITHUB_BASE_REF')
 
-    return (
-        os.environ.get('GITHUB_REF_NAME')
-        if os.environ.get('GITHUB_REF_TYPE') == 'branch'
-        else None
-    )
+    if os.environ.get('GITHUB_EVENT_NAME') == 'branch':
+        return os.environ.get('GITHUB_REF_NAME')
+
+    else:
+        warning(
+            f"Unrecognized GITHUB_EVENT_NAME '{os.environ.get('GITHUB_EVENT_NAME')}' - cannot auto-detect target branch"
+        )
+
+        for a in [
+            'GITHUB_EVENT_NAME',
+            'GITHUB_REF_NAME',
+            'GITHUB_REF_TYPE',
+            'GITHUB_BASE_REF',
+            'GITHUB_REF',
+            'GITHUB_HEAD_REF',
+        ]:
+            info(f'{a}: ' + str(os.environ.get(a)))
+
+        return None
 
 
 @task(
