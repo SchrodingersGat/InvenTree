@@ -1847,7 +1847,7 @@ def _detect_ci_branch() -> Optional[str]:
     if os.environ.get('GITHUB_EVENT_NAME') == 'pull_request':
         return os.environ.get('GITHUB_BASE_REF')
 
-    if os.environ.get('GITHUB_EVENT_NAME') == 'branch':
+    if os.environ.get('GITHUB_REF_TYPE') == 'branch':
         return os.environ.get('GITHUB_REF_NAME')
 
     else:
