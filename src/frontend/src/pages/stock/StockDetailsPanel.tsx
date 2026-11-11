@@ -27,6 +27,7 @@ import {
 } from '../../components/details/Details';
 import { DetailsImage } from '../../components/details/DetailsImage';
 import { ItemDetailsGrid } from '../../components/details/ItemDetails';
+import { RenderCostRange } from '../../components/render/Pricing';
 import { formatCurrency } from '../../defaults/formatters';
 import { useFindSerialNumberForm } from '../../forms/StockForms';
 import { useInstance } from '../../hooks/UseInstance';
@@ -316,6 +317,41 @@ export function StockDetailsPanel({
       label: t`Expiry Date`,
       hidden: !enableExpiry || !instance?.expiry_date,
       icon: 'calendar'
+    },
+    {
+      // Cost summary - only provided by the API for users with the 'pricing' view role
+      type: 'text',
+      name: 'unit_cost',
+      label: t`Unit Cost`,
+      icon: 'currency',
+      hidden: !instance?.pricing_detail,
+      value_formatter: () => (
+        <RenderCostRange
+          minCost={instance.pricing_detail.min_cost}
+          maxCost={instance.pricing_detail.max_cost}
+          currency={instance.pricing_detail.currency}
+          estimated={instance.pricing_detail.estimated}
+          incomplete={instance.pricing_detail.incomplete}
+        />
+      )
+    },
+    {
+      type: 'text',
+      name: 'total_cost',
+      label: t`Total Cost`,
+      icon: 'currency',
+      hidden:
+        !instance?.pricing_detail ||
+        instance?.quantity == 1 ||
+        instance?.quantity == 0,
+      value_formatter: () => (
+        <RenderCostRange
+          minCost={instance.pricing_detail.min_cost}
+          maxCost={instance.pricing_detail.max_cost}
+          currency={instance.pricing_detail.currency}
+          multiplier={instance.quantity}
+        />
+      )
     },
     {
       type: 'text',

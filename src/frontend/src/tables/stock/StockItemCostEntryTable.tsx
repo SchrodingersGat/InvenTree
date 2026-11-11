@@ -1,0 +1,240 @@
+import { t } from '@lingui/core/macro';
+import { Badge, Tooltip } from '@mantine/core';
+import { useCallback, useMemo, useState } from 'react';
+
+import { AddItemButton } from '@lib/components/AddItemButton';
+import {
+  type RowAction,
+  RowDeleteAction,
+  RowEditAction
+} from '@lib/components/RowActions';
+import { ApiEndpoints } from '@lib/enums/ApiEndpoints';
+import { UserRoles } from '@lib/enums/Roles';
+import { apiUrl } from '@lib/functions/Api';
+import useTable from '@lib/hooks/UseTable';
+import type { TableFilter } from '@lib/types/Filters';
+import type { TableColumn } from '@lib/types/Tables';
+import { RenderCostRange } from '../../components/render/Pricing';
+import { StatusRenderer } from '../../components/render/StatusRenderer';
+import {
+  BooleanColumn,
+  DateColumn,
+  NoteColumn,
+  UserColumn
+} from '../../components/tables/ColumnRenderers';
+import { StatusFilterOptions } from '../../components/tables/Filter';
+import { InvenTreeTable } from '../../components/tables/InvenTreeTable';
+import { useStockItemCostEntryFields } from '../../forms/PricingForms';
+import {
+  useCreateApiFormModal,
+  useDeleteApiFormModal,
+  useEditApiFormModal
+} from '../../hooks/UseForm';
+import { useUserState } from '../../states/UserState';
+
+// Name of the backend status class which defines the available cost types
+const COST_TYPE_STATUS = 'CostType';
+
+/**
+ * Table displaying the cost entries for a single stock item.
+ *
+ * Requires the 'pricing' view role (the API also requires the 'stock' view role).
+ * Adding, editing or removing entries requires the matching 'pricing' role permission,
+ * plus the 'stock' change permission.
+ */
+export default function StockItemCostEntryTable({
+  stockItem,
+  onCostsChanged
+}: Readonly<{
+  stockItem: any;
+  onCostsChanged?: () => void;
+}>) {
+  const user = useUserState();
+  const table = useTable('stock-item-cost-entries');
+
+  const [selectedEntry, setSelectedEntry] = useState<number | undefined>(
+    undefined
+  );
+
+  const canChangeStock: boolean = useMemo(
+    () => user.hasChangeRole(UserRoles.stock),
+    [user]
+  );
+
+  const costEntryFields = useStockItemCostEntryFields({
+    stockItemId: stockItem.pk
+  });
+
+  const onFormSuccess = useCallback(() => {
+    table.refreshTable();
+    onCostsChanged?.();
+  }, [table, onCostsChanged]);
+
+  const newCostEntry = useCreateApiFormModal({
+    url: apiUrl(ApiEndpoints.stock_cost_entry_list),
+    title: t`Add Cost`,
+    fields: costEntryFields,
+    onFormSuccess: onFormSuccess
+  });
+
+  const editCostEntry = useEditApiFormModal({
+    url: apiUrl(ApiEndpoints.stock_cost_entry_list),
+    pk: selectedEntry,
+    title: t`Edit Cost`,
+    fields: costEntryFields,
+    onFormSuccess: onFormSuccess
+  });
+
+  const deleteCostEntry = useDeleteApiFormModal({
+    url: apiUrl(ApiEndpoints.stock_cost_entry_list),
+    pk: selectedEntry,
+    title: t`Delete Cost`,
+    onFormSuccess: onFormSuccess
+  });
+
+  const columns: TableColumn[] = useMemo(() => {
+    return [
+      {
+        accessor: 'cost_type',
+        title: t`Cost Type`,
+        sortable: true,
+        switchable: false,
+        render: (record: any) => (
+          <StatusRenderer status={record.cost_type} type={COST_TYPE_STATUS} />
+        )
+      },
+      {
+        accessor: 'min_cost',
+        title: t`Unit Cost`,
+        sortable: false,
+        switchable: false,
+        render: (record: any) => (
+          <RenderCostRange
+            minCost={record.min_cost}
+            maxCost={record.max_cost}
+            currency={record.currency}
+          />
+        )
+      },
+      {
+        accessor: 'converted_min_cost',
+        title: t`Converted Unit Cost`,
+        sortable: true,
+        render: (record: any) => {
+          if (
+            !record.converted_currency ||
+            record.converted_min_cost == null ||
+            record.converted_max_cost == null
+          ) {
+            return (
+              <Tooltip
+                label={t`This cost could not be converted to the default currency, and is not included in the total`}
+              >
+                <Badge color='orange' size='xs' variant='light'>
+                  {t`Not converted`}
+                </Badge>
+              </Tooltip>
+            );
+          }
+
+          return (
+            <RenderCostRange
+              minCost={record.converted_min_cost}
+              maxCost={record.converted_max_cost}
+              currency={record.converted_currency}
+            />
+          );
+        }
+      },
+      BooleanColumn({
+        accessor: 'estimated',
+        title: t`Estimated`
+      }),
+      {
+        accessor: 'source',
+        title: t`Source`,
+        sortable: true
+      },
+      NoteColumn({}),
+      UserColumn({}),
+      DateColumn({
+        accessor: 'date',
+        title: t`Last Updated`,
+        sortable: true
+      })
+    ];
+  }, []);
+
+  const tableFilters: TableFilter[] = useMemo(() => {
+    return [
+      {
+        name: 'cost_type',
+        label: t`Cost Type`,
+        description: t`Filter by cost type`,
+        choiceFunction: StatusFilterOptions(COST_TYPE_STATUS)
+      },
+      {
+        name: 'estimated',
+        label: t`Estimated`,
+        description: t`Show estimated costs`,
+        type: 'boolean'
+      }
+    ];
+  }, []);
+
+  const tableActions = useMemo(() => {
+    return [
+      <AddItemButton
+        key='add-cost-entry'
+        tooltip={t`Add Cost`}
+        onClick={() => newCostEntry.open()}
+        hidden={!user.hasAddRole(UserRoles.pricing) || !canChangeStock}
+      />
+    ];
+  }, [user, canChangeStock]);
+
+  const rowActions = useCallback(
+    (record: any): RowAction[] => {
+      return [
+        RowEditAction({
+          hidden: !user.hasChangeRole(UserRoles.pricing) || !canChangeStock,
+          onClick: () => {
+            setSelectedEntry(record.pk);
+            editCostEntry.open();
+          }
+        }),
+        RowDeleteAction({
+          hidden: !user.hasDeleteRole(UserRoles.pricing) || !canChangeStock,
+          onClick: () => {
+            setSelectedEntry(record.pk);
+            deleteCostEntry.open();
+          }
+        })
+      ];
+    },
+    [user, canChangeStock]
+  );
+
+  return (
+    <>
+      {newCostEntry.modal}
+      {editCostEntry.modal}
+      {deleteCostEntry.modal}
+      <InvenTreeTable
+        tableState={table}
+        url={apiUrl(ApiEndpoints.stock_cost_entry_list)}
+        columns={columns}
+        props={{
+          params: {
+            stock_item: stockItem.pk,
+            user_detail: true
+          },
+          tableActions: tableActions,
+          tableFilters: tableFilters,
+          rowActions: rowActions,
+          enableDownload: true
+        }}
+      />
+    </>
+  );
+}

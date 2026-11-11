@@ -26,6 +26,7 @@ import order.models
 import part.filters as part_filters
 import part.models as part_models
 import part.serializers as part_serializers
+import pricing.serializers as pricing_serializers
 import stock.filters
 import stock.status_codes
 from audit.helpers import audit_event, write_batched
@@ -391,6 +392,7 @@ class StockItemSerializer(
             'location_detail',
             'location_path',
             'part_detail',
+            'pricing_detail',
             'supplier_part_detail',
             'tags',
             'tests',
@@ -641,6 +643,19 @@ class StockItemSerializer(
         },
         default_include=False,
         prefetch_fields=['location'],
+    )
+
+    pricing_detail = OptionalField(
+        serializer_class=pricing_serializers.StockItemCostBriefSerializer,
+        serializer_kwargs={
+            'label': _('Unit Cost'),
+            'source': 'cost',
+            'many': False,
+            'read_only': True,
+            'allow_null': True,
+        },
+        default_include=False,
+        prefetch_fields=['cost'],
     )
 
     tests = OptionalField(
