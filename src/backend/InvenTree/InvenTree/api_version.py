@@ -1,17 +1,24 @@
 """InvenTree API version information."""
 
 # InvenTree API version
-INVENTREE_API_VERSION = 575
+INVENTREE_API_VERSION = 577
+
 """Increment this API version number whenever there is a significant change to the API that any clients need to know about."""
 
 INVENTREE_API_TEXT = """
 
-v575 -> 2026-11-10 : https://github.com/inventree/InvenTree/pull/XXXX
+v577 -> 2026-11-12 : https://github.com/inventree/InvenTree/pull/XXXX
     - Adds StockItemCostEntry and StockItemCost (summary) models to the "pricing" app
     - Adds /api/pricing/stock-cost-entry/ list and detail endpoints (and /api/pricing/stock-cost-entry/status/)
     - Adds /api/pricing/stock-cost/ list and detail endpoints (read-only)
     - Access to these endpoints requires the "pricing" role, and the "stock" role (view to read, change to write)
     - Adds optional "pricing_detail" field to the StockItem API (requires the "pricing" view role)
+
+v576 -> 2026-11-11 : https://github.com/inventree/InvenTree/pull/13247
+    - Adds /api/system/messages/ endpoint: staff-only, read-only; classified system messages are provided in the "messages" array
+
+v575 -> 2026-11-10 : https://github.com/inventree/InvenTree/pull/13208
+    - Adds optional read-only "consumed_by_detail" to the StockItem API
 
 v574 -> 2026-11-07 : https://github.com/inventree/InvenTree/pull/13169
     - breaking: Basic authentication can now be disabled - controlled with INVENTREE_BASIC_AUTH_ENABLED
