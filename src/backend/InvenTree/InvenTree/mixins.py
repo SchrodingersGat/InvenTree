@@ -57,7 +57,11 @@ class RowLockMixin:
         """
         try:
             pk = model._meta.pk.to_python(pk)
+        except AttributeError:
+            # This class may not have an associated model or _meta attribute
+            return False
         except DjangoValidationError:
+            # The primary key value could not be converted to the correct type
             return False
 
         if pk is None:
