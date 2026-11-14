@@ -372,8 +372,9 @@ class OAuth2TestMixin:
 
     def get_oauth2_token(self, scope: str, user=None):
         """Issue an OAuth2 access token with the provided (space separated) scopes."""
-        from datetime import timedelta
+        from datetime import datetime, timedelta
 
+        from django.conf import settings
         from django.utils import timezone
 
         from oauth2_provider.models import AccessToken, Application
@@ -387,11 +388,17 @@ class OAuth2TestMixin:
             },
         )
 
+        # When USE_TZ is False (test mode), use naive datetime; otherwise use aware datetime
+        if settings.USE_TZ:
+            expires = timezone.now() + timedelta(hours=1)
+        else:
+            expires = datetime.now() + timedelta(hours=1)
+
         return AccessToken.objects.create(
             user=user or self.user,
             application=application,
             token=f'oauth2-test-token-{AccessToken.objects.count()}',
-            expires=timezone.now() + timedelta(hours=1),
+            expires=expires,
             scope=scope,
         )
 
