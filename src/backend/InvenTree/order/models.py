@@ -1507,7 +1507,7 @@ class SalesOrder(StockConsumerMixin, AuditedOrderMixin, TotalPriceMixin, Order):
     """A SalesOrder represents a list of goods shipped outwards to a customer."""
 
     # Stock shipped against a SalesOrder is consumed by the order
-    CONSUMED_STOCK_ON_DELETE = ConsumedStockPolicy.PROTECT
+    CONSUMED_STOCK_ON_DELETE = ConsumedStockPolicy.KEEP
     STOCK_CONSUMED_EVENT = 'SHIPPED_AGAINST_SALES_ORDER'
     STOCK_CONSUMED_DELTA_KEY = 'salesorder'
 

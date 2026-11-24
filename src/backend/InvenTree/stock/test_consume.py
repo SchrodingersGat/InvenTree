@@ -32,9 +32,9 @@ class ConsumerDeclarationTest(ConsumptionTestBase):
     def test_consumers(self):
         """Each consumer declares its delete policy, audit event and customer."""
         expected = {
-            Build: (ConsumedStockPolicy.CASCADE, 'BUILD_CONSUMED', 'buildorder'),
+            Build: (ConsumedStockPolicy.KEEP, 'BUILD_CONSUMED', 'buildorder'),
             SalesOrder: (
-                ConsumedStockPolicy.PROTECT,
+                ConsumedStockPolicy.KEEP,
                 'SHIPPED_AGAINST_SALES_ORDER',
                 'salesorder',
             ),
@@ -43,7 +43,7 @@ class ConsumerDeclarationTest(ConsumptionTestBase):
                 'INSTALLED_INTO_ASSEMBLY',
                 'stockitem',
             ),
-            Company: (ConsumedStockPolicy.PROTECT, 'SENT_TO_CUSTOMER', 'customer'),
+            Company: (ConsumedStockPolicy.KEEP, 'SENT_TO_CUSTOMER', 'customer'),
         }
 
         for model, (policy, event, key) in expected.items():
@@ -472,49 +472,49 @@ class ConsumedStockDeletePolicyTest(ConsumptionTestBase):
         consume_stock([ConsumeRequest(item, quantity, consumer)])
         return item
 
-    def test_protect_sales_order(self):
-        """A SalesOrder with consumed stock cannot be deleted."""
+    def assertKept(self, item, model, pk):
+        """Assert that the item is still consumed by a (deleted) consumer."""
+        item = StockItem.objects.get(pk=item.pk)
+
+        self.assertTrue(item.is_consumed)
+        self.assertIsNone(item.consumer)
+        self.assertEqual(item.consumed_by_model_type.model_class(), model)
+        self.assertEqual(item.consumed_by_model_id, pk)
+        self.assertFalse(item.is_in_stock())
+        self.assertFalse(
+            StockItem.objects.filter(StockItem.IN_STOCK_FILTER, pk=item.pk).exists()
+        )
+
+        # The dangling reference is still valid
+        item.full_clean()
+        item.save()
+
+        return item
+
+    def test_keep_sales_order(self):
+        """Deleting a SalesOrder keeps its consumed stock (still consumed)."""
         order = SalesOrder.objects.create(customer=self.customer, reference='SO-9100')
         item = self.consume(order)
+        pk = order.pk
 
-        with self.assertRaises(ValidationError):
-            order.delete()
-
-        # QuerySet.delete() is also prevented
-        with self.assertRaises(ValidationError):
-            SalesOrder.objects.filter(pk=order.pk).delete()
-
-        self.assertTrue(SalesOrder.objects.filter(pk=order.pk).exists())
-        item.refresh_from_db()
-        self.assertEqual(item.consumer, order)
-
-        # Once the stock is released, the order can be deleted
-        release_stock(item, self.returns)
         order.delete()
-        self.assertTrue(StockItem.objects.filter(pk=item.pk).exists())
 
-    def test_protect_company(self):
-        """A Company with consumed stock cannot be deleted."""
+        self.assertFalse(SalesOrder.objects.filter(pk=pk).exists())
+        self.assertKept(item, SalesOrder, pk)
+
+    def test_keep_queryset_delete(self):
+        """QuerySet.delete() also keeps consumed stock."""
         company = Company.objects.create(name='Customer C', is_customer=True)
         item = self.consume(company)
+        pk = company.pk
 
-        with self.assertRaises(ValidationError):
-            company.delete()
+        Company.objects.filter(pk=pk).delete()
 
-        with self.assertRaises(ValidationError):
-            Company.objects.filter(pk=company.pk).delete()
+        self.assertFalse(Company.objects.filter(pk=pk).exists())
+        self.assertKept(item, Company, pk)
 
-        item.refresh_from_db()
-        self.assertEqual(item.consumer, company)
-
-    def test_protect_without_stock(self):
-        """A PROTECT consumer without consumed stock can be deleted."""
-        company = Company.objects.create(name='Customer D', is_customer=True)
-        company.delete()
-        self.assertFalse(Company.objects.filter(pk=company.pk).exists())
-
-    def test_cascade_build(self):
-        """Deleting a Build deletes its consumed stock."""
+    def test_keep_build(self):
+        """Deleting a Build keeps its consumed stock."""
         build = Build.objects.create(
             reference=generate_next_build_reference(),
             part=self.assembly,
@@ -522,12 +522,33 @@ class ConsumedStockDeletePolicyTest(ConsumptionTestBase):
             status=BuildStatus.PENDING,
         )
         item = self.consume(build)
-        other = self.stock(5)
+        pk = build.pk
 
         build.delete()
 
-        self.assertFalse(StockItem.objects.filter(pk=item.pk).exists())
-        self.assertTrue(StockItem.objects.filter(pk=other.pk).exists())
+        self.assertKept(item, Build, pk)
+
+    def test_release_deleted_consumer(self):
+        """Stock consumed by a deleted consumer can still be released."""
+        company = Company.objects.create(name='Customer D', is_customer=True)
+        item = self.consume(company, quantity=10)
+        pk = company.pk
+        company.delete()
+
+        item = StockItem.objects.get(pk=item.pk)
+        returned = release_stock(item, self.returns, quantity=4)
+
+        self.assertNotEqual(returned.pk, item.pk)
+        self.assertFalse(returned.is_consumed)
+        self.assertTrue(returned.is_in_stock())
+        self.assertEqual(returned.location, self.returns)
+
+        # The remainder is still consumed by the deleted company
+        self.assertKept(item, Company, pk)
+
+        # The deleted consumer is recorded by its primary key
+        entry = last_event(returned, StockHistoryCode.RETURNED_TO_STOCK)
+        self.assertEqual(recorded(entry, 'customer'), pk)
 
     def test_cascade_stock_item(self):
         """Deleting a stock item deletes the items installed in it (recursively)."""

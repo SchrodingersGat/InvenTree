@@ -141,7 +141,7 @@ class Company(
     IMPORT_ID_FIELDS = ['name']
 
     # Stock assigned to a customer (outside of a SalesOrder) is consumed by the company
-    CONSUMED_STOCK_ON_DELETE = ConsumedStockPolicy.PROTECT
+    CONSUMED_STOCK_ON_DELETE = ConsumedStockPolicy.KEEP
     STOCK_CONSUMED_EVENT = 'SENT_TO_CUSTOMER'
     STOCK_CONSUMED_DELTA_KEY = 'customer'
 

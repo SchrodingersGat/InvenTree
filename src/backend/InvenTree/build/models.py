@@ -146,8 +146,8 @@ class Build(
 
     STATUS_CLASS = BuildStatus
 
-    # Stock consumed by a build order is deleted along with the build order
-    CONSUMED_STOCK_ON_DELETE = ConsumedStockPolicy.CASCADE
+    # Stock consumed by a build order is kept (still consumed) if the build order is deleted
+    CONSUMED_STOCK_ON_DELETE = ConsumedStockPolicy.KEEP
     STOCK_CONSUMED_EVENT = 'BUILD_CONSUMED'
     STOCK_CONSUMED_DELTA_KEY = 'buildorder'
     IMPORT_ID_FIELDS = ['reference']

@@ -818,40 +818,37 @@ class InvenTreeNoteMixin(
 class ConsumedStockPolicy(models.TextChoices):
     """What happens to consumed stock when its consumer is deleted.
 
+    KEEP: The consumed stock items are left in place, still consumed and referencing
+          the (now deleted) consumer. The audit log retains a record of the consumer.
     CASCADE: The consumed stock items are deleted along with the consumer
-    PROTECT: The consumer cannot be deleted while it holds consumed stock
     """
 
+    KEEP = 'keep', _('Keep')
     CASCADE = 'cascade', _('Cascade')
-    PROTECT = 'protect', _('Protect')
 
 
 class ConsumedStockRelation(GenericRelation):
     """Reverse generic relation from a stock consumer to the StockItem objects it has consumed.
 
     Applies the CONSUMED_STOCK_ON_DELETE policy of the consumer model when it is deleted:
+    - KEEP: No related objects are reported to the deletion Collector, so consumed
+      stock items are left untouched (the generic reference is left dangling)
     - CASCADE: The consumed stock items are deleted along with the consumer
-    - PROTECT: Deletion is refused while consumed stock items exist
 
-    The policy is applied while the deletion Collector gathers related objects
-    (as for on_delete=PROTECT), i.e. before the delete transaction starts. This also
-    covers QuerySet.delete(), and does not poison an enclosing transaction.
+    A generic reference has no database constraint, so a dangling reference is valid:
+    StockItem.consumer resolves to None, while the item remains consumed.
     """
 
     def bulk_related_objects(self, objs, using=DEFAULT_DB_ALIAS):
-        """Return the consumed stock items to cascade-delete, or refuse the deletion."""
+        """Return the consumed stock items to cascade-delete (if any)."""
         queryset = super().bulk_related_objects(objs, using=using)
 
         policy = getattr(self.model, 'CONSUMED_STOCK_ON_DELETE', None)
 
-        if policy == ConsumedStockPolicy.PROTECT and queryset.exists():
-            raise ValidationError(
-                _('Cannot delete {model}, as it has consumed stock items').format(
-                    model=self.model._meta.verbose_name
-                )
-            )
+        if policy == ConsumedStockPolicy.CASCADE:
+            return queryset
 
-        return queryset
+        return queryset.none()
 
 
 class StockConsumerMixin(ModelFeatureMixin, models.Model):
@@ -871,7 +868,7 @@ class StockConsumerMixin(ModelFeatureMixin, models.Model):
 
     MODEL_FEATURE = 'org.inventree.i.modelfeatures.consumes_stock'
 
-    CONSUMED_STOCK_ON_DELETE: ConsumedStockPolicy = ConsumedStockPolicy.PROTECT
+    CONSUMED_STOCK_ON_DELETE: ConsumedStockPolicy = ConsumedStockPolicy.KEEP
     STOCK_CONSUMED_EVENT: Optional[str] = None
     STOCK_CONSUMED_DELTA_KEY: Optional[str] = None
 

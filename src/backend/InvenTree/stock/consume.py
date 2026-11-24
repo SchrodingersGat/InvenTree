@@ -7,7 +7,8 @@ implements StockConsumerMixin can consume stock.
 - consume_stock() marks stock as consumed, splitting off partial quantities (batched)
 - release_stock() returns consumed stock back into inventory
 
-The delete policy of a consumer is enforced by ConsumedStockRelation (generic.models.modelmixins).
+The delete policy of a consumer is applied by ConsumedStockRelation (generic.models.modelmixins).
+By default consumed stock is kept when its consumer is deleted, leaving a dangling reference.
 """
 
 import copy
@@ -17,6 +18,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Optional
 
+from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models.base import ModelState
@@ -90,8 +92,8 @@ def get_consumed_event(consumer: StockConsumerMixin) -> int:
     return getattr(StockHistoryCode, name).value
 
 
-def get_consumer_delta_key(consumer: StockConsumerMixin) -> str:
-    """Return the key under which the consumer is recorded in the audit deltas."""
+def get_consumer_delta_key(consumer) -> str:
+    """Return the key under which the consumer (instance or model class) is recorded in the audit deltas."""
     key = getattr(consumer, 'STOCK_CONSUMED_DELTA_KEY', None)
 
     if not key:
@@ -394,10 +396,14 @@ def release_stock(
     if not item.lock_quantity():
         raise ValidationError(_('Stock item no longer exists'))
 
-    consumer = item.consumer
-
-    if consumer is None:
+    if not item.is_consumed:
         raise ValidationError(_('Stock item has not been consumed'))
+
+    # The consumer may have been deleted (KEEP policy), leaving a dangling reference
+    consumer = item.consumer
+    consumer_model = ContentType.objects.get_for_id(
+        item.consumed_by_model_type_id
+    ).model_class()
 
     if location and location.structural:
         raise ValidationError({
@@ -419,7 +425,7 @@ def release_stock(
             # The split-off item inherits the consumer, which is cleared below
             target = item.splitStock(quantity, None, user, notes=notes)
 
-    installed = isinstance(consumer, StockItem)
+    installed = consumer_model is not None and issubclass(consumer_model, StockItem)
 
     if code is None:
         code = (
@@ -429,7 +435,10 @@ def release_stock(
         )
 
     deltas = {
-        get_consumer_delta_key(consumer): consumer,
+        # A deleted consumer is recorded by its (dangling) primary key
+        get_consumer_delta_key(consumer_model): consumer
+        if consumer is not None
+        else item.consumed_by_model_id,
         'quantity': float(target.quantity),
     }
 
@@ -455,7 +464,7 @@ def release_stock(
         )
 
         # Removal from another stock item is also recorded against the parent
-        if installed:
+        if installed and consumer is not None:
             events.enter_context(
                 consumer.tracking_event(
                     StockHistoryCode.REMOVED_CHILD_ITEM,
