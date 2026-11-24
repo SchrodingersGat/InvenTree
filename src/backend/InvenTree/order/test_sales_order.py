@@ -415,7 +415,7 @@ class SalesOrderTest(InvenTreeAPITestCase):
         self.assertEqual(sc.quantity, 100)
 
         # And 2 items created which are associated with the order
-        outputs = StockItem.objects.filter(sales_order=self.order)
+        outputs = StockItem.objects.filter(StockItem.consumed_by_filter(self.order))
         self.assertEqual(outputs.count(), 2)
 
         for item in outputs.all():
@@ -645,7 +645,7 @@ class SalesOrderTest(InvenTreeAPITestCase):
         # Every allocation should now point to a StockItem which has been assigned to the customer
         self.assertEqual(
             shipment.allocations.filter(
-                item__sales_order=so, item__customer=customer
+                item__in=StockItem.objects.filter(StockItem.consumed_by_filter(so))
             ).count(),
             N_ITEMS,
         )
@@ -730,7 +730,10 @@ class SalesOrderTest(InvenTreeAPITestCase):
         sample_pk = next(iter(split_pks))
         sample_original = StockItem.objects.get(pk=sample_pk)
         sample_new_item = StockItem.objects.get(
-            part=part, quantity=1, sales_order=so, parent=sample_original
+            StockItem.consumed_by_filter(so),
+            part=part,
+            quantity=1,
+            parent=sample_original,
         )
 
         self.assertEqual(sample_new_item.quantity, 1)
@@ -1477,7 +1480,7 @@ class SalesOrderShipmentCompleteConcurrencyTest(TransactionTestCase):
         self.assertEqual(self.stock_item.quantity, 4)
 
         shipped_items = StockItem.objects.filter(
-            parent=self.stock_item, sales_order=self.order
+            StockItem.consumed_by_filter(self.order), parent=self.stock_item
         )
 
         self.assertEqual(shipped_items.count(), 2)

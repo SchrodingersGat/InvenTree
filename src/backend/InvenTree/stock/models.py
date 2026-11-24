@@ -8,6 +8,7 @@ from collections.abc import Callable
 from contextlib import ExitStack, contextmanager, nullcontext
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
+from typing import Optional
 
 from django.conf import settings
 from django.contrib.auth.models import User
@@ -707,10 +708,6 @@ class StockItem(
     # See also: StockItem.in_stock() method
     IN_STOCK_FILTER = Q(
         quantity__gt=0,
-        sales_order=None,
-        belongs_to=None,
-        customer=None,
-        consumed_by=None,
         consumed_by_model_type=None,
         is_building=False,
         status__in=StockStatusGroups.AVAILABLE_CODES,
@@ -833,10 +830,6 @@ class StockItem(
             'purchase_order': order.models.PurchaseOrder,
             'supplier_part': CompanyModels.SupplierPart,
             'location': StockLocation,
-            'belongs_to': StockItem,
-            'customer': CompanyModels.Company,
-            'consumed_by': build.models.Build,
-            'sales_order': order.models.SalesOrder,
         }
 
         for field, model in fk_relations.items():
@@ -1209,10 +1202,6 @@ class StockItem(
         except PartModels.Part.DoesNotExist:
             pass
 
-        # Ensure that the item cannot be assigned to itself
-        if self.belongs_to and self.belongs_to.pk == self.pk:
-            raise ValidationError({'belongs_to': _('Item cannot belong to itself')})
-
         self.validate_consumer()
 
         # If the item is marked as "is_building", it must point to a build!
@@ -1290,28 +1279,6 @@ class StockItem(
         help_text=_('Packaging this stock item is stored in'),
     )
 
-    # When deleting a stock item with installed items, those installed items are also installed
-    belongs_to = models.ForeignKey(
-        'self',
-        verbose_name=_('Installed In'),
-        on_delete=models.CASCADE,
-        related_name='installed_parts',
-        blank=True,
-        null=True,
-        help_text=_('Is this item installed in another item?'),
-    )
-
-    customer = models.ForeignKey(
-        CompanyModels.Company,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        limit_choices_to={'is_customer': True},
-        related_name='assigned_stock',
-        help_text=_('Customer'),
-        verbose_name=_('Customer'),
-    )
-
     serial = models.CharField(
         verbose_name=_('Serial Number'),
         max_length=100,
@@ -1356,16 +1323,6 @@ class StockItem(
         related_name='build_outputs',
     )
 
-    consumed_by = models.ForeignKey(
-        'build.Build',
-        on_delete=models.CASCADE,
-        verbose_name=_('Consumed By'),
-        blank=True,
-        null=True,
-        help_text=_('Build order which consumed this stock item'),
-        related_name='consumed_stock',
-    )
-
     is_building = models.BooleanField(default=False)
 
     purchase_order = models.ForeignKey(
@@ -1376,15 +1333,6 @@ class StockItem(
         blank=True,
         null=True,
         help_text=_('Purchase order for this stock item'),
-    )
-
-    sales_order = models.ForeignKey(
-        'order.SalesOrder',
-        on_delete=models.SET_NULL,
-        verbose_name=_('Destination Sales Order'),
-        related_name='stock_items',
-        null=True,
-        blank=True,
     )
 
     # Generic reference to the object which has consumed this stock item.
@@ -1406,13 +1354,135 @@ class StockItem(
         help_text=_('ID of the object which has consumed this stock item'),
     )
 
-    # Note: Renamed to 'consumed_by' once the legacy 'consumed_by' field is removed
-    consumer = GenericForeignKey('consumed_by_model_type', 'consumed_by_model_id')
+    # Note: This may refer to an object which has since been deleted (see ConsumedStockPolicy.KEEP),
+    # in which case it resolves to None (while the item remains consumed)
+    consumed_by = GenericForeignKey('consumed_by_model_type', 'consumed_by_model_id')
 
     @property
     def is_consumed(self) -> bool:
-        """Return True if this stock item has been consumed (generic relation)."""
+        """Return True if this stock item has been consumed."""
         return self.consumed_by_model_type_id is not None
+
+    @property
+    def consumer_model(self):
+        """Return the model class of the consumer of this stock item (or None)."""
+        if self.consumed_by_model_type_id is None:
+            return None
+
+        # Use the ContentType cache, to avoid a database query
+        return ContentType.objects.get_for_id(
+            self.consumed_by_model_type_id
+        ).model_class()
+
+    def _get_consumer_of_type(self, model):
+        """Return the consumer of this stock item, if it is an instance of the provided model."""
+        if self.consumer_model is not model:
+            return None
+
+        return self.consumed_by
+
+    # Read-only helpers which provide the (legacy) view of the consumer of this stock item
+    # Note: These are not database fields, and cannot be used in queries
+
+    @property
+    def belongs_to(self) -> Optional[StockItem]:
+        """Return the StockItem which this item is installed in (or None)."""
+        return self._get_consumer_of_type(StockItem)
+
+    @property
+    def sales_order(self):
+        """Return the SalesOrder which this item has been shipped against (or None)."""
+        return self._get_consumer_of_type(order.models.SalesOrder)
+
+    @property
+    def consumed_by_build(self):
+        """Return the Build which has consumed this stock item (or None)."""
+        return self._get_consumer_of_type(build.models.Build)
+
+    @property
+    def customer(self):
+        """Return the customer (Company) which this item has been sent to (or None).
+
+        This is derived from the direct consumer of this item only (a SalesOrder or a Company).
+        """
+        consumer = self.consumed_by
+
+        if consumer is None:
+            return None
+
+        return consumer.get_consuming_customer()
+
+    @property
+    def customer_id(self) -> Optional[int]:
+        """Return the primary key of the customer which this item has been sent to (or None)."""
+        consumer = self.consumed_by
+
+        if consumer is None:
+            return None
+
+        return consumer.get_consuming_customer_id()
+
+    @staticmethod
+    def consumed_by_filter(consumer) -> Q:
+        """Return a filter matching the stock items consumed by the provided object."""
+        return Q(
+            consumed_by_model_type=ContentType.objects.get_for_model(consumer),
+            consumed_by_model_id=consumer.pk,
+        )
+
+    @staticmethod
+    def consumer_type_filter(*models) -> Q:
+        """Return a filter matching the stock items consumed by any of the provided model types."""
+        return Q(
+            consumed_by_model_type__in=[
+                ContentType.objects.get_for_model(model) for model in models
+            ]
+        )
+
+    @staticmethod
+    def customer_filter(customer=None) -> Q:
+        """Return a filter matching the stock items which have been sent to a customer.
+
+        Arguments:
+            customer: A Company (or primary key) - if None, match any customer
+
+        Stock is sent to a customer when it is consumed by a SalesOrder, or by a Company directly.
+        """
+        SalesOrder = order.models.SalesOrder
+        Company = CompanyModels.Company
+
+        if customer is None:
+            return StockItem.consumer_type_filter(SalesOrder, Company)
+
+        pk = getattr(customer, 'pk', customer)
+
+        return Q(
+            consumed_by_model_type=ContentType.objects.get_for_model(Company),
+            consumed_by_model_id=pk,
+        ) | Q(
+            consumed_by_model_type=ContentType.objects.get_for_model(SalesOrder),
+            consumed_by_model_id__in=SalesOrder.objects.filter(customer=pk).values(
+                'pk'
+            ),
+        )
+
+    @staticmethod
+    def installed_items_subquery():
+        """Return a subquery expression counting the items installed in each StockItem (for annotation)."""
+        return Coalesce(
+            models.Subquery(
+                StockItem.objects
+                .filter(
+                    consumed_by_model_type=ContentType.objects.get_for_model(StockItem),
+                    consumed_by_model_id=models.OuterRef('pk'),
+                )
+                .order_by()
+                .values('consumed_by_model_id')
+                .annotate(count=models.Count('pk'))
+                .values('count')
+            ),
+            0,
+        )
 
     def validate_consumer(self):
         """Validate the generic consumer reference."""
@@ -1635,53 +1705,47 @@ class StockItem(
         Args:
             customer: The customer (Company) to assign the stock to
             quantity: Quantity to assign (if not supplied, total quantity is used)
-            order: SalesOrder reference
+            order: SalesOrder reference (if provided, the stock is consumed by the order)
             user: User that performed the action
             notes: Notes field
+
+        Returns:
+            The StockItem which was assigned to the customer (which may be a newly split item)
         """
-        # Lock the database row, so concurrent adjustments are serialized
-        if not self.lock_quantity():
-            raise ValidationError(_('Stock item no longer exists'))
+        from stock.consume import ConsumeRequest, consume_stock
+
+        # The SalesOrder (if provided) is the consumer - the customer is derived from it
+        consumer = order or customer
+
+        if consumer is None:
+            raise ValidationError({'customer': _('Customer must be specified')})
 
         if quantity is None or self.serialized:
             quantity = self.quantity
 
-        # Cannot allocate more than the available quantity
-        # (also ensures the recorded history matches the actual allocation)
-        quantity = min(quantity, self.quantity)
-
-        if quantity <= 0:
+        if Decimal(str(quantity)) <= 0:
             raise ValidationError({'quantity': _('Quantity must be greater than zero')})
 
-        if quantity >= self.quantity:
-            item = self
-        else:
-            item = self.splitStock(quantity, None, user)
+        deltas = {}
 
-        code = StockHistoryCode.SENT_TO_CUSTOMER
-        deltas = {'quantity': float(quantity)}
-
-        if customer is not None:
+        if order and customer:
             deltas['customer'] = customer
-            deltas['customer_name'] = customer.name
 
-        # If an order is provided, we are shipping against a SalesOrder, not manually!
-        if order:
-            code = StockHistoryCode.SHIPPED_AGAINST_SALES_ORDER
-            deltas['salesorder'] = order
+        results = consume_stock(
+            [ConsumeRequest(self, quantity, consumer, deltas=deltas)],
+            user=user,
+            notes=notes or '',
+        )
 
-        # Update StockItem fields with new information
-        item.sales_order = order
-        item.customer = customer
-        item.location = None
+        if not results:
+            raise ValidationError(_('Stock item no longer exists'))
 
-        with item.tracking_event(code, user, deltas, notes=notes):
-            item.save(add_note=False)
+        item = results[0].item
 
         trigger_event(
             StockEvents.ITEM_ASSIGNED_TO_CUSTOMER,
-            id=self.id,
-            customer=customer.id if customer else None,
+            id=item.pk,
+            customer=customer.pk if customer else None,
         )
 
         # Return the reference to the stock item
@@ -1723,91 +1787,27 @@ class StockItem(
             user: The user performing the action
             quantity: If specified, the quantity to return to stock (default is the full quantity)
             merge: If True, attempt to merge this stock item back into the parent stock item
+
+        Keyword Arguments:
+            notes: Notes to record against the tracking entry
+            status: Optionally set the status of the returned stock item
+            tracking_code: The StockHistoryCode to record (default = RETURNED_TO_STOCK)
+
+        Returns:
+            The returned StockItem (which may be a newly split item, or the parent item if merged)
         """
-        notes = kwargs.get('notes', '')
+        from stock.consume import release_stock
 
-        tracking_code = kwargs.get('tracking_code', StockHistoryCode.RETURNED_TO_STOCK)
-
-        item = self
-
-        if quantity is not None and not self.serialized:
-            # If quantity is specified, we are splitting the stock item
-            if quantity <= 0:
-                raise ValidationError({
-                    'quantity': _('Quantity must be greater than zero')
-                })
-
-            if quantity > self.quantity:
-                raise ValidationError({
-                    'quantity': _('Quantity exceeds available stock')
-                })
-
-            if quantity < self.quantity:
-                # Split the stock item
-                item = self.splitStock(quantity, None, user)
-
-        tracking_info = {
-            'quantity': float(quantity)
-            if quantity is not None
-            else float(item.quantity)
-        }
-
-        if location:
-            tracking_info['location'] = location
-
-        if item.customer:
-            tracking_info['customer'] = item.customer
-            tracking_info['customer_name'] = item.customer.name
-
-        if item.consumed_by:
-            tracking_info['build_order'] = item.consumed_by
-
-        # Clear out allocation information for the stock item
-        item.consumed_by = None
-        item.customer = None
-        item.belongs_to = None
-        item.sales_order = None
-        item.location = location
-
-        if status := kwargs.pop('status', None):
-            if not item.compare_status(status):
-                old_custom_status = item.get_custom_status()
-                old_status_logical = item.status
-                item.set_status(status)
-                tracking_info['status'] = status  # may be a custom value
-                tracking_info['status_logical'] = (
-                    item.status
-                )  # always the logical value
-                tracking_info['old_status'] = (
-                    old_custom_status if old_custom_status else old_status_logical
-                )
-                tracking_info['old_status_logical'] = old_status_logical
-
-        with item.tracking_event(
-            tracking_code, user, notes=notes, deltas=tracking_info
-        ):
-            item.save()
-
-        item.clearAllocations()
-
-        trigger_event(StockEvents.ITEM_RETURNED_TO_STOCK, id=item.id)
-
-        # Attempt to merge returned item into parent item:
-        # - 'merge' parameter is True
-        # - The parent location is the same as the current location
-        # - The item does not have a serial number
-
-        if (
-            merge
-            and not item.serialized
-            and self.parent
-            and item.location == self.parent.location
-        ):
-            self.parent.merge_stock_items(
-                {item}, user=user, location=location, notes=notes
-            )
-        else:
-            item.save(add_note=False)
+        return release_stock(
+            self,
+            location,
+            user=user,
+            quantity=quantity,
+            status=kwargs.get('status'),
+            code=kwargs.get('tracking_code', StockHistoryCode.RETURNED_TO_STOCK),
+            notes=kwargs.get('notes', ''),
+            merge=merge,
+        )
 
     def is_allocated(self):
         """Return True if this StockItem is allocated to a SalesOrder, TransferOrder, or a Build."""
@@ -2005,7 +2005,7 @@ class StockItem(
         """
         installed = set()
 
-        items = StockItem.objects.filter(belongs_to=self)
+        items = self.consumed_stock.all()
 
         for item in items:
             # Prevent duplication or recursion
@@ -2028,10 +2028,10 @@ class StockItem(
 
     def installed_item_count(self):
         """Return the number of stock items installed inside this one."""
-        return self.installed_parts.count()
+        return self.consumed_stock.count()
 
     @transaction.atomic
-    def installStockItem(self, other_item, quantity, user, notes, build=None):
+    def installStockItem(self, other_item, quantity, user, notes):
         """Install another stock item into this stock item.
 
         Args:
@@ -2039,65 +2039,36 @@ class StockItem(
             quantity: The quantity of stock to install
             user: The user performing the operation
             notes: Any notes associated with the operation
-            build: The BuildOrder to associate with the operation (optional)
+
+        Returns:
+            The installed StockItem (which may be a newly split item)
         """
-        # Lock the database row, so concurrent adjustments are serialized
-        if not other_item.lock_quantity():
-            raise ValidationError(_('Stock item no longer exists'))
+        from stock.consume import ConsumeRequest, consume_stock
 
         try:
-            quantity = Decimal(quantity)
+            quantity = Decimal(str(quantity))
         except (InvalidOperation, TypeError):
             raise ValidationError({'quantity': _('Invalid quantity value')})
 
         if quantity <= 0:
             raise ValidationError({'quantity': _('Quantity must be greater than zero')})
 
-        # Cannot install more than the available quantity
-        # (also ensures the recorded history matches the actual installation)
-        quantity = min(quantity, other_item.quantity)
+        results = consume_stock(
+            [ConsumeRequest(other_item, quantity, self)], user=user, notes=notes or ''
+        )
 
-        # If the quantity is less than the stock item, split the stock!
-        stock_item = other_item.splitStock(quantity, None, user)
+        if not results:
+            raise ValidationError(_('Stock item no longer exists'))
 
-        if stock_item is None:
-            stock_item = other_item
-
-        # Assign the other stock item into this one
-        stock_item.belongs_to = self
-
-        if build is not None:
-            stock_item.consumed_by = build
-
-        stock_item.location = None
-
-        deltas = {'stockitem': self, 'quantity': float(quantity)}
-
-        if build is not None:
-            deltas['buildorder'] = build
-
-        # Record the operation against both the installed item and this item (the assembly)
-        with (
-            stock_item.tracking_event(
-                StockHistoryCode.INSTALLED_INTO_ASSEMBLY,
-                user,
-                notes=notes,
-                deltas=deltas,
-            ),
-            self.tracking_event(
-                StockHistoryCode.INSTALLED_CHILD_ITEM,
-                user,
-                notes=notes,
-                deltas={'stockitem': stock_item, 'quantity': float(quantity)},
-            ),
-        ):
-            stock_item.save(add_note=False)
+        installed = results[0].item
 
         trigger_event(
             StockEvents.ITEM_INSTALLED_INTO_ASSEMBLY,
-            id=stock_item.pk,
+            id=installed.pk,
             assembly_id=self.pk,
         )
+
+        return installed
 
     @transaction.atomic
     def uninstall_into_location(self, location, user, notes):
@@ -2108,38 +2079,13 @@ class StockItem(
             user: The user performing the operation
             notes: Any notes associated with the operation
         """
+        from stock.consume import release_stock
+
         # If the stock item is not installed in anything, ignore
-        if self.belongs_to is None:
+        if self.consumer_model is not StockItem:
             return False
 
-        if location and location.structural:
-            raise ValidationError({
-                'location': _('Cannot assign stock to structural location')
-            })
-
-        tracking_info = {'stockitem': self.belongs_to, 'quantity': float(self.quantity)}
-
-        # Record the operation against both the parent item and this item
-        with (
-            self.belongs_to.tracking_event(
-                StockHistoryCode.REMOVED_CHILD_ITEM,
-                user,
-                deltas={'stockitem': self, 'quantity': float(self.quantity)},
-                notes=notes,
-            ),
-            self.tracking_event(
-                StockHistoryCode.REMOVED_FROM_ASSEMBLY,
-                user,
-                notes=notes,
-                deltas=tracking_info,
-            ),
-        ):
-            # Mark this stock item as *not* belonging to anyone
-            self.belongs_to = None
-            self.consumed_by = None
-            self.location = location
-
-            self.save()
+        release_stock(self, location, user=user, notes=notes or '')
 
     def allocate_disassembly_pricing(self, quantity, lines: list) -> list:
         """Allocate the purchase price of this stock item across disassembly lines.
@@ -2284,7 +2230,7 @@ class StockItem(
 
         # Any items installed within this stock item *must* be broken out,
         # which requires that the entire quantity is disassembled
-        installed_items = list(self.installed_parts.all())
+        installed_items = list(self.consumed_stock.all())
 
         if len(installed_items) > 0 and quantity != self.quantity:
             raise ValidationError({
@@ -2441,13 +2387,8 @@ class StockItem(
         if check_in_production and self.is_building:
             return False
 
-        return all([
-            self.sales_order is None,  # Not assigned to a SalesOrder
-            self.belongs_to is None,  # Not installed inside another StockItem
-            self.customer is None,  # Not assigned to a customer
-            self.consumed_by is None,  # Not consumed by a build
-            self.consumed_by_model_type_id is None,  # Not consumed (generic)
-        ])
+        # Not consumed (by a build, sales order, customer, another stock item, etc)
+        return not self.is_consumed
 
     @property
     def in_stock(self) -> bool:
@@ -2796,6 +2737,9 @@ class StockItem(
 
             if self.customer:
                 raise ValidationError(_('Stock item has been assigned to a customer'))
+
+            if self.is_consumed:
+                raise ValidationError(_('Stock item has been consumed'))
 
             if self.is_building:
                 raise ValidationError(_('Stock item is currently in production'))

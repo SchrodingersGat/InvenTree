@@ -527,7 +527,6 @@ class StockItemSerializer(
         # rather than once per StockItem row.
         queryset = queryset.prefetch_related(
             'location',
-            'sales_order',
             'purchase_order',
             Prefetch(
                 'part',
@@ -544,8 +543,7 @@ class StockItemSerializer(
             'part__category',
             'supplier_part',
             'supplier_part__manufacturer_part',
-            'customer',
-            'belongs_to',
+            # The (generic) consumer of each stock item
             'consumed_by',
         )
 
@@ -602,7 +600,9 @@ class StockItemSerializer(
         )
 
         # Annotate with the total number of "installed items"
-        queryset = queryset.annotate(installed_items=SubqueryCount('installed_parts'))
+        queryset = queryset.annotate(
+            installed_items=StockItem.installed_items_subquery()
+        )
 
         # Annotate with the total number of "child items" (split stock items)
         queryset = queryset.annotate(child_items=SubqueryCount('children'))
@@ -713,11 +713,46 @@ class StockItemSerializer(
         help_text=_('Purchase currency of this stock item')
     )
 
+    # Read-only fields which describe the (generic) consumer of this stock item
+    # Note: These are derived from the consumed_by_model_type / consumed_by_model_id fields
+
+    belongs_to = serializers.IntegerField(
+        source='belongs_to.pk',
+        read_only=True,
+        allow_null=True,
+        label=_('Installed In'),
+        help_text=_('Stock item which this item is installed in'),
+    )
+
+    consumed_by = serializers.IntegerField(
+        source='consumed_by_build.pk',
+        read_only=True,
+        allow_null=True,
+        label=_('Consumed By'),
+        help_text=_('Build order which consumed this stock item'),
+    )
+
+    sales_order = serializers.IntegerField(
+        source='sales_order.pk',
+        read_only=True,
+        allow_null=True,
+        label=_('Sales Order'),
+        help_text=_('Sales order which this stock item was shipped against'),
+    )
+
+    customer = serializers.IntegerField(
+        source='customer_id',
+        read_only=True,
+        allow_null=True,
+        label=_('Customer'),
+        help_text=_('Customer which this stock item was sent to'),
+    )
+
     consumed_by_detail = OptionalField(
         serializer_class=BuildBriefSerializer,
         serializer_kwargs={
             'label': _('Consumed By'),
-            'source': 'consumed_by',
+            'source': 'consumed_by_build',
             'read_only': True,
             'allow_null': True,
         },

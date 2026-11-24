@@ -149,6 +149,10 @@ class Company(
         """Stock assigned to a company is received by that company."""
         return self
 
+    def get_consuming_customer_id(self):
+        """Return the primary key of this company."""
+        return self.pk
+
     class Meta:
         """Metaclass defines extra model options."""
 

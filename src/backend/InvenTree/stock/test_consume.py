@@ -80,7 +80,7 @@ class ConsumeStockTest(ConsumptionTestBase):
         """Check that an item is consumed by the given consumer."""
         item.refresh_from_db()
 
-        self.assertEqual(item.consumer, consumer)
+        self.assertEqual(item.consumed_by, consumer)
         self.assertEqual(
             item.consumed_by_model_type, ContentType.objects.get_for_model(consumer)
         )
@@ -372,7 +372,7 @@ class ReleaseStockTest(ConsumptionTestBase):
                 self.assertEqual(released.pk, item.pk)
                 item.refresh_from_db()
                 self.assertFalse(item.is_consumed)
-                self.assertIsNone(item.consumer)
+                self.assertIsNone(item.consumed_by)
                 self.assertEqual(item.location, self.returns)
                 self.assertTrue(is_available(item))
 
@@ -395,7 +395,7 @@ class ReleaseStockTest(ConsumptionTestBase):
 
         item.refresh_from_db()
         self.assertEqual(item.quantity, 6)
-        self.assertEqual(item.consumer, self.build)
+        self.assertEqual(item.consumed_by, self.build)
 
     def test_release_installed(self):
         """Releasing an installed item records removal against both items."""
@@ -477,7 +477,7 @@ class ConsumedStockDeletePolicyTest(ConsumptionTestBase):
         item = StockItem.objects.get(pk=item.pk)
 
         self.assertTrue(item.is_consumed)
-        self.assertIsNone(item.consumer)
+        self.assertIsNone(item.consumed_by)
         self.assertEqual(item.consumed_by_model_type.model_class(), model)
         self.assertEqual(item.consumed_by_model_id, pk)
         self.assertFalse(item.is_in_stock())

@@ -292,7 +292,9 @@ class StockAuditTest(StockAuditTestBase):
         self.assertEqual(
             item_entry.event_type, StockHistoryCode.INSTALLED_INTO_ASSEMBLY
         )
-        self.assertEqual(item_entry.changes_dict['belongs_to'], [None, assembly.pk])
+        self.assertEqual(
+            item_entry.changes_dict['consumed_by_model_id'], [None, assembly.pk]
+        )
 
         # Nothing has changed for the assembly - the event is still recorded
         self.assertEqual(
@@ -421,7 +423,9 @@ class StockEventCoverageTest(StockAuditTestBase):
         [entry] = self.new_entries(self.item, n)
 
         self.assertEqual(entry.event_type, StockHistoryCode.SENT_TO_CUSTOMER)
-        self.assertEqual(entry.changes_dict['customer'], [None, customer.pk])
+        self.assertEqual(
+            entry.changes_dict['consumed_by_model_id'], [None, customer.pk]
+        )
         self.assertEqual(entry.additional_data['deltas']['quantity'], 100.0)
 
         # Return the item from the customer
@@ -435,9 +439,11 @@ class StockEventCoverageTest(StockAuditTestBase):
         self.assertEqual(entry.event_type, StockHistoryCode.RETURNED_FROM_CUSTOMER)
         self.assertEqual(entry.notes, 'Returned')
 
-        # The customer is recorded as a field change (not duplicated in the deltas)
-        self.assertEqual(entry.changes_dict['customer'], [customer.pk, None])
-        self.assertNotIn('customer', entry.additional_data['deltas'])
+        # The consumer is cleared, and the customer is recorded in the deltas
+        self.assertEqual(
+            entry.changes_dict['consumed_by_model_id'], [customer.pk, None]
+        )
+        self.assertEqual(entry.additional_data['deltas']['customer']['pk'], customer.pk)
 
     def test_ship_against_order(self):
         """Allocating stock against a sales order records the SHIPPED_AGAINST_SALES_ORDER event."""
@@ -457,10 +463,9 @@ class StockEventCoverageTest(StockAuditTestBase):
 
         shipped = StockItem.objects.get(parent=self.item)
 
-        # The split item records its creation, and the shipment
-        [created, shipped_entry] = self.entries(shipped)
+        # The split item records its creation with the shipment (a single entry)
+        [shipped_entry] = self.entries(shipped)
 
-        self.assertEqual(created.event_type, StockHistoryCode.SPLIT_FROM_PARENT)
         self.assertEqual(
             shipped_entry.event_type, StockHistoryCode.SHIPPED_AGAINST_SALES_ORDER
         )
@@ -474,7 +479,7 @@ class StockEventCoverageTest(StockAuditTestBase):
 
         customer = Company.objects.create(name='Return Customer', is_customer=True)
 
-        self.item.customer = customer
+        self.item.consumed_by = customer
         self.item.location = None
         self.item.save()
 

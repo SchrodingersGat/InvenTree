@@ -40,25 +40,11 @@ from stock.status_codes import StockHistoryCode, StockStatus
 def consumer_of(item: StockItem):
     """Return the object which has consumed the provided stock item (or None).
 
-    This is the single point of contact with the underlying "consumption" fields.
-    Precedence matches the planned data migration:
-    belongs_to > sales_order > consumed_by > customer
+    This is the single point of contact with the underlying "consumption" fields
+    (the generic consumed_by reference).
     """
     item.refresh_from_db()
-
-    if item.belongs_to_id:
-        return item.belongs_to
-
-    if item.sales_order_id:
-        return item.sales_order
-
-    if item.consumed_by_id:
-        return item.consumed_by
-
-    if item.customer_id:
-        return item.customer
-
-    return None
+    return item.consumed_by
 
 
 def is_available(item: StockItem) -> bool:
@@ -344,7 +330,7 @@ class BuildConsumptionTest(ConsumptionTestBase):
         self.assertTrue(is_available(source))
 
         event = last_event(source, StockHistoryCode.RETURNED_TO_STOCK)
-        self.assertEqual(recorded(event, 'build_order'), self.build.pk)
+        self.assertEqual(recorded(event, 'buildorder'), self.build.pk)
 
 
 class SalesOrderConsumptionTest(ConsumptionTestBase):
@@ -635,12 +621,20 @@ class InstallationTest(ConsumptionTestBase):
 class DeleteConsumerTest(ConsumptionTestBase):
     """Behaviour of consumed stock when its consumer is deleted.
 
-    These describe the CURRENT behaviour. The refactor deliberately changes
-    SalesOrder and Company deletion to PROTECT - update those tests then.
+    Build, SalesOrder and Company use the KEEP policy: the stock remains consumed,
+    referencing the deleted consumer. StockItem cascades to its installed items.
     """
 
-    def test_delete_build_cascades(self):
-        """Deleting a build deletes the stock it consumed (CASCADE)."""
+    def assertKept(self, item, model):
+        """Assert that the item remains consumed by a deleted consumer of the given type."""
+        item.refresh_from_db()
+        self.assertTrue(item.is_consumed)
+        self.assertIs(item.consumer_model, model)
+        self.assertIsNone(consumer_of(item))
+        self.assertFalse(is_available(item))
+
+    def test_delete_build_keeps_stock(self):
+        """Deleting a build keeps the stock it consumed (KEEP)."""
         build = Build.objects.create(
             reference=generate_next_build_reference(),
             part=self.assembly,
@@ -659,7 +653,7 @@ class DeleteConsumerTest(ConsumptionTestBase):
 
         build.delete()
 
-        self.assertFalse(StockItem.objects.filter(pk=source.pk).exists())
+        self.assertKept(source, Build)
 
     def test_delete_parent_cascades(self):
         """Deleting a stock item deletes the items installed in it (CASCADE)."""
@@ -671,10 +665,10 @@ class DeleteConsumerTest(ConsumptionTestBase):
 
         self.assertFalse(StockItem.objects.filter(pk=child.pk).exists())
 
-    def test_delete_sales_order_set_null(self):
-        """Deleting a sales order clears the reference, but the customer remains.
+    def test_delete_sales_order_keeps_stock(self):
+        """Deleting a sales order keeps the shipped stock consumed (KEEP).
 
-        Planned change: SalesOrder becomes PROTECT.
+        The customer is derived from the (deleted) order, so is no longer known.
         """
         order = SalesOrder.objects.create(customer=self.customer, reference='SO-9002')
         source = self.stock(5)
@@ -682,16 +676,12 @@ class DeleteConsumerTest(ConsumptionTestBase):
 
         order.delete()
 
-        source.refresh_from_db()
+        self.assertKept(source, SalesOrder)
         self.assertIsNone(source.sales_order)
-        self.assertEqual(source.customer, self.customer)
-        self.assertFalse(is_available(source))
+        self.assertIsNone(source.customer)
 
-    def test_delete_company_set_null(self):
-        """Deleting a customer clears the reference, returning stock to availability.
-
-        Planned change: Company becomes PROTECT.
-        """
+    def test_delete_company_keeps_stock(self):
+        """Deleting a customer keeps the assigned stock consumed (KEEP)."""
         company = Company.objects.create(name='Customer B', is_customer=True)
         source = self.stock(5)
         source.allocateToCustomer(company, user=self.user)
@@ -699,29 +689,28 @@ class DeleteConsumerTest(ConsumptionTestBase):
 
         company.delete()
 
-        self.assertIsNone(consumer_of(source))
-        self.assertTrue(is_available(source))
+        self.assertKept(source, Company)
 
 
 class ConsumptionQueryCountTest(ConsumptionTestBase):
-    """Query-count baseline for the batched consume paths.
+    """Query-count ceilings for the batched consume paths.
 
-    The ceilings are the measured pre-refactor values, keyed by the number of
-    stock items consumed (half split, half consumed whole). The refactor must
-    not exceed them.
+    Keyed by the number of stock items consumed (half split, half consumed whole).
+    Pre-refactor baseline (2026-11-24): build {50: 97, 500: 776}, shipment {50: 131, 500: 1031}.
 
-    The pre-refactor counts are NOT constant - known per-item queries:
-    - The AUDIT_LOG_ENABLED setting is read once per audit event
-      (audit.signals, ~1.5 x N; not cached outside a request without a global cache)
-    - Shipments lazily load the StockLocation of each split source item
-      (SalesOrderShipment.complete_allocations does not select_related 'item__location')
+    Since the cutover to stock.consume.consume_stock() (phase 3):
+    - Build consumption has a small constant overhead (+4 or +5: the consume_stock()
+      savepoint, re-reading the locked items, the consumer ContentType)
+    - Shipments no longer load the StockLocation of each split source item
 
-    Once these are removed, replace the ceilings with a constant-count assertion.
+    The counts are still NOT constant: the AUDIT_LOG_ENABLED setting is read once per
+    audit event (audit.signals, ~1.5 x N; not cached outside a request without a
+    global cache). Once removed, replace the ceilings with a constant-count assertion.
     """
 
-    # Measured baseline (pre-refactor, 2026-11-24): {N: queries}
-    BUILD_QUERY_CEILING = {50: 97, 500: 776}
-    SHIPMENT_QUERY_CEILING = {50: 131, 500: 1031}
+    # Measured (phase 3 cutover, 2026-11-24): {N: queries}
+    BUILD_QUERY_CEILING = {50: 102, 500: 780}
+    SHIPMENT_QUERY_CEILING = {50: 110, 500: 785}
 
     def make_stock(self, n) -> list[StockItem]:
         """Create n stock items; every 2nd one is consumed whole, the others split."""
@@ -758,7 +747,10 @@ class ConsumptionQueryCountTest(ConsumptionTestBase):
         line.refresh_from_db()
         self.assertEqual(line.consumed, n)
         self.assertEqual(
-            StockItem.objects.filter(consumed_by=build, part=part).count(), n
+            StockItem.objects.filter(
+                StockItem.consumed_by_filter(build), part=part
+            ).count(),
+            n,
         )
 
         return len(ctx.captured_queries)
@@ -785,7 +777,10 @@ class ConsumptionQueryCountTest(ConsumptionTestBase):
         line.refresh_from_db()
         self.assertEqual(line.shipped, n)
         self.assertEqual(
-            StockItem.objects.filter(sales_order=order, part=part).count(), n
+            StockItem.objects.filter(
+                StockItem.consumed_by_filter(order), part=part
+            ).count(),
+            n,
         )
 
         return len(ctx.captured_queries)

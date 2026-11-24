@@ -56,17 +56,13 @@ class StockItemAdmin(admin.ModelAdmin):
     search_fields = ['part__name', 'part__description', 'serial', 'batch']
 
     autocomplete_fields = [
-        'belongs_to',
         'build',
-        'customer',
         'location',
         'parent',
         'part',
         'purchase_order',
-        'sales_order',
         'stocktake_user',
         'supplier_part',
-        'consumed_by',
     ]
 
 

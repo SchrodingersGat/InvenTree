@@ -545,7 +545,7 @@ class StockTest(StockTestBase):
         parent = StockItem.objects.get(pk=1)
 
         item = StockItem.objects.get(pk=2)
-        item.belongs_to = parent
+        item.consumed_by = parent
         item.save()
 
         n_entries = stock_history(item).count()
@@ -820,7 +820,7 @@ class StockTest(StockTestBase):
         n = it.quantity
         an = n - 10
         customer = Company.objects.create(name='MyTestCompany')
-        order = SalesOrder.objects.create(description='Test order')
+        order = SalesOrder.objects.create(description='Test order', customer=customer)
         ait = it.allocateToCustomer(
             customer, quantity=an, order=order, user=None, notes='Allocated some stock'
         )
@@ -1235,7 +1235,7 @@ class StockTest(StockTestBase):
 
         # An item assigned to a customer is likewise protected
         customer = Company.objects.create(name='MergeCust', is_customer=True)
-        assigned = StockItem.objects.create(part=part, quantity=5, customer=customer)
+        assigned = StockItem.objects.create(part=part, quantity=5, consumed_by=customer)
 
         target.merge_stock_items([assigned])
 
@@ -1873,7 +1873,7 @@ class TestResultTest(StockTestBase):
 
         # Create a stock item which is installed *inside* the master item
         sub_item = StockItem.objects.create(
-            part=item.part, quantity=1, belongs_to=item, location=None
+            part=item.part, quantity=1, consumed_by=item, location=None
         )
 
         # Now, create some test results against the sub item

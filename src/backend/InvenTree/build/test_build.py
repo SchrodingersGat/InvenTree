@@ -538,7 +538,7 @@ class BuildTest(BuildTestBase):
 
         self.assertTrue(self.build.can_complete)
 
-        n = StockItem.objects.filter(consumed_by=self.build).count()
+        n = StockItem.objects.filter(StockItem.consumed_by_filter(self.build)).count()
 
         self.build.complete_build(None)
 
@@ -555,22 +555,26 @@ class BuildTest(BuildTestBase):
 
         # However, the "available" stock quantity has been decreased
         self.assertEqual(
-            items.filter(consumed_by=None).aggregate(Sum('quantity'))['quantity__sum'],
+            items.filter(consumed_by_model_type=None).aggregate(Sum('quantity'))[
+                'quantity__sum'
+            ],
             5,
         )
 
         # And the "consumed_by" quantity has been increased
         self.assertEqual(
-            items.filter(consumed_by=self.build).aggregate(Sum('quantity'))[
-                'quantity__sum'
-            ],
+            items.filter(StockItem.consumed_by_filter(self.build)).aggregate(
+                Sum('quantity')
+            )['quantity__sum'],
             30,
         )
 
         self.assertEqual(StockItem.objects.get(pk=self.stock_3_1.pk).quantity, 980)
 
         # Check that the "consumed_by" item count has increased
-        consumed_items = StockItem.objects.filter(consumed_by=self.build)
+        consumed_items = StockItem.objects.filter(
+            StockItem.consumed_by_filter(self.build)
+        )
         self.assertEqual(consumed_items.count(), n + 8)
 
         # Finally, return the items into stock
@@ -580,7 +584,10 @@ class BuildTest(BuildTestBase):
             item.return_to_stock(location)
 
         # No consumed items should remain
-        self.assertEqual(StockItem.objects.filter(consumed_by=self.build).count(), 0)
+        self.assertEqual(
+            StockItem.objects.filter(StockItem.consumed_by_filter(self.build)).count(),
+            0,
+        )
 
     def test_return_consumed(self):
         """Test returning consumed stock items to stock."""
@@ -591,7 +598,9 @@ class BuildTest(BuildTestBase):
         self.assertGreater(self.build.allocated_stock.count(), 0)
 
         self.build.complete_build(self.user)
-        consumed_items = StockItem.objects.filter(consumed_by=self.build)
+        consumed_items = StockItem.objects.filter(
+            StockItem.consumed_by_filter(self.build)
+        )
         self.assertGreater(consumed_items.count(), 0)
 
         location = StockLocation.objects.filter(structural=False).last()
@@ -1557,7 +1566,9 @@ class BuildTaskTests(BuildTestBase):
         self.build.refresh_from_db()
         self.assertEqual(self.build.status, BuildStatus.COMPLETE)
 
-        n_consumed = StockItem.objects.filter(consumed_by=self.build).count()
+        n_consumed = StockItem.objects.filter(
+            StockItem.consumed_by_filter(self.build)
+        ).count()
         n_tracking = stock_history_count()
 
         # A redelivered task run must skip based on the (locked) database state
@@ -1566,7 +1577,8 @@ class BuildTaskTests(BuildTestBase):
             trigger.assert_not_called()
 
         self.assertEqual(
-            StockItem.objects.filter(consumed_by=self.build).count(), n_consumed
+            StockItem.objects.filter(StockItem.consumed_by_filter(self.build)).count(),
+            n_consumed,
         )
         self.assertEqual(stock_history_count(), n_tracking)
 
@@ -1782,7 +1794,7 @@ class BuildTaskTests(BuildTestBase):
 
         # Only 50 units of sub_part_1 should have been consumed (not 100)
         consumed_qty = StockItem.objects.filter(
-            consumed_by=self.build, part=self.sub_part_1
+            StockItem.consumed_by_filter(self.build), part=self.sub_part_1
         ).aggregate(total=Sum('quantity'))['total']
         self.assertEqual(consumed_qty, 50)
 
@@ -1861,7 +1873,9 @@ class BuildTaskTests(BuildTestBase):
         # complete_allocation splits stock_3_1 and installs the split piece into output_1
         # (stock_3_1 quantity=1000, only 6 allocated, so a child item is created)
         self.assertTrue(
-            StockItem.objects.filter(belongs_to=self.output_1).exists(),
+            StockItem.objects.filter(
+                StockItem.consumed_by_filter(self.output_1)
+            ).exists(),
             'Expected a tracked stock item to be installed into the output',
         )
 
@@ -2273,12 +2287,20 @@ class BuildCompleteAsyncOffloadTest(BuildTestBase):
 
         self.assertEqual(self.build.incomplete_count, 0)
 
-        # Completing the tracked outputs above already consumes stock_3_1 against this
-        # build (synchronously - that path is not under test here). Record that baseline
-        # so the assertions below can isolate the effect of the *untracked* completion,
-        # which is what genuinely goes through the async offload under test.
-        baseline_consumed = StockItem.objects.filter(consumed_by=self.build).count()
-        self.assertGreater(baseline_consumed, 0)
+        # Completing the tracked outputs above installs stock_3_1 into the outputs
+        # (synchronously - that path is not under test here), so it is consumed by the
+        # outputs rather than the build. Record the baseline so the assertions below
+        # isolate the effect of the *untracked* completion, which is what genuinely
+        # goes through the async offload under test.
+        baseline_consumed = StockItem.objects.filter(
+            StockItem.consumed_by_filter(self.build)
+        ).count()
+        self.assertEqual(baseline_consumed, 0)
+        self.assertTrue(
+            StockItem.objects.filter(
+                StockItem.consumed_by_filter(self.output_1)
+            ).exists()
+        )
 
         # Partially allocate untracked stock_1_2 (100 in stock) - less than its full
         # quantity, so completion must split off exactly the consumed amount
@@ -2305,7 +2327,8 @@ class BuildCompleteAsyncOffloadTest(BuildTestBase):
         # Nothing further has been consumed yet - the queued task has not actually run
         self.assertIsNone(Build.objects.get(pk=self.build.pk).completion_date)
         self.assertEqual(
-            StockItem.objects.filter(consumed_by=self.build).count(), baseline_consumed
+            StockItem.objects.filter(StockItem.consumed_by_filter(self.build)).count(),
+            baseline_consumed,
         )
         self.assertFalse(StockItem.objects.filter(parent=self.stock_1_2).exists())
         self.assertTrue(
@@ -2324,11 +2347,11 @@ class BuildCompleteAsyncOffloadTest(BuildTestBase):
         self.assertIsNotNone(self.build.completion_date)
 
         # Stock must actually have been consumed against this build
-        consumed = StockItem.objects.filter(consumed_by=self.build)
+        consumed = StockItem.objects.filter(StockItem.consumed_by_filter(self.build))
         self.assertGreater(consumed.count(), 0)
 
         split_child = StockItem.objects.get(
-            parent=self.stock_1_2, consumed_by=self.build
+            StockItem.consumed_by_filter(self.build), parent=self.stock_1_2
         )
         self.assertEqual(split_child.quantity, 40)
 
@@ -2398,6 +2421,6 @@ class BuildCancelAsyncOffloadTest(BuildTestBase):
         # The allocation must have been consumed (not just silently deleted)
         self.assertFalse(BuildItem.objects.filter(build_line=self.line_1).exists())
         split_child = StockItem.objects.get(
-            parent=self.stock_1_2, consumed_by=self.build
+            StockItem.consumed_by_filter(self.build), parent=self.stock_1_2
         )
         self.assertEqual(split_child.quantity, 40)

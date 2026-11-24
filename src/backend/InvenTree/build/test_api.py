@@ -2847,7 +2847,7 @@ class BuildConsumeTest(BuildAPITest):
 
                 # A new stock item should have been split off, and consumed by the build
                 consumed_items = StockItem.objects.filter(
-                    part=component, consumed_by=build
+                    StockItem.consumed_by_filter(build), part=component
                 )
                 self.assertEqual(consumed_items.count(), 1)
                 consumed_item = consumed_items.first()
@@ -3003,9 +3003,11 @@ class BuildConsumeTest(BuildAPITest):
 
             component_item.refresh_from_db()
 
-            # The component is now installed into (and consumed by) the output
+            # The component is now installed into (consumed by) the output,
+            # and the build order is derived from the output
             self.assertEqual(component_item.belongs_to, output_item)
-            self.assertEqual(component_item.consumed_by, tracked_build)
+            self.assertEqual(component_item.consumed_by, output_item)
+            self.assertEqual(component_item.belongs_to.build, tracked_build)
 
             self.assertTrue(
                 any(

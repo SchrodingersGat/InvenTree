@@ -1588,7 +1588,7 @@ class StockItemListTest(StockAPITestCase):
         builds[0].refresh_from_db()
         self.assertEqual(builds[0].reference, original_reference)
         self.assertEqual(
-            StockItem.objects.get(pk=children[0].pk).consumed_by_id, builds[0].pk
+            StockItem.objects.get(pk=children[0].pk).consumed_by_build, builds[0]
         )
 
         # Requesting the field must not bypass build view permissions.
@@ -1645,7 +1645,10 @@ class StockItemListTest(StockAPITestCase):
             StockItem(part=assembly, quantity=1, consumed_by=build_order)
             for build_order in builds
         ])
-        queryset = StockItem.objects.filter(consumed_by__in=builds)
+        queryset = StockItem.objects.filter(
+            StockItem.consumer_type_filter(build.models.Build),
+            consumed_by_model_id__in=[b.pk for b in builds],
+        )
         serializer = StockItemSerializer(consumed_by_detail=True)
         self.assertIn('consumed_by', serializer.prefetch_list)
         self.assertNotIn('consumed_by', StockItemSerializer().prefetch_list)
@@ -2766,7 +2769,7 @@ class StockItemTest(StockAPITestCase):
         item = StockItem.objects.get(pk=521)
         customer = company.models.Company.objects.get(pk=4)
 
-        item.customer = customer
+        item.consumed_by = customer
         item.save()
 
         n_entries = stock_events(item).count()
@@ -3313,7 +3316,7 @@ class StockItemDisassembleTest(StockAPITestCase):
         return StockItem.objects.create(
             part=part.models.Part.objects.get(pk=part_pk),
             quantity=quantity,
-            belongs_to=self.item,
+            consumed_by=self.item,
             location=None,
             **kwargs,
         )
@@ -3674,7 +3677,7 @@ class StocktakeTest(StockAPITestCase):
         stock_item = StockItem.objects.get(pk=1234)
 
         # Mark the item as 'out of stock' by assigning a customer
-        stock_item.customer = company.models.Company.objects.first()
+        stock_item.consumed_by = company.models.Company.objects.first()
         stock_item.save()
 
         InvenTreeSetting.set_setting('STOCK_ALLOW_OUT_OF_STOCK_TRANSFER', False)
@@ -5024,7 +5027,7 @@ class StockAssignTest(StockAPITestCase):
 
         customer = company.models.Company.objects.get(pk=4)
 
-        self.assertEqual(customer.assigned_stock.count(), 0)
+        self.assertEqual(customer.consumed_stock.count(), 0)
 
         response = self.post(
             self.URL, data={'items': stock_items, 'customer': 4}, expected_code=201
@@ -5033,7 +5036,7 @@ class StockAssignTest(StockAPITestCase):
         self.assertEqual(response.data['customer'], 4)
 
         # 5 stock items should now have been assigned to this customer
-        self.assertEqual(customer.assigned_stock.count(), 5)
+        self.assertEqual(customer.consumed_stock.count(), 5)
 
 
 class StockMergeTest(StockAPITestCase):

@@ -1,10 +1,15 @@
 """InvenTree API version information."""
 
 # InvenTree API version
-INVENTREE_API_VERSION = 583
+INVENTREE_API_VERSION = 584
 """Increment this API version number whenever there is a significant change to the API that any clients need to know about."""
 
 INVENTREE_API_TEXT = """
+
+v584 -> 2026-11-24 : https://github.com/inventree/InvenTree/pull/XXXXX
+    - Stock consumption is recorded via a single generic reference (consumed_by_model_type / consumed_by_model_id)
+    - The "belongs_to", "consumed_by", "sales_order" and "customer" fields on the StockItem API are now read-only (derived from the consumer)
+    - The "belongs_to", "consumed_by", "sales_order" and "customer" StockItem filters now match the consumer of the stock item
 
 v583 -> 2026-11-20 : https://github.com/inventree/InvenTree/issues/12121
     - Adds parameter support to the StockLocationType model and API endpoints

@@ -836,7 +836,7 @@ class ConsumedStockRelation(GenericRelation):
     - CASCADE: The consumed stock items are deleted along with the consumer
 
     A generic reference has no database constraint, so a dangling reference is valid:
-    StockItem.consumer resolves to None, while the item remains consumed.
+    StockItem.consumed_by resolves to None, while the item remains consumed.
     """
 
     def bulk_related_objects(self, objs, using=DEFAULT_DB_ALIAS):
@@ -878,7 +878,7 @@ class StockConsumerMixin(ModelFeatureMixin, models.Model):
         abstract = True
 
     # Reverse relation to the StockItem objects consumed by this instance
-    consumed_stock_items = ConsumedStockRelation(
+    consumed_stock = ConsumedStockRelation(
         'stock.StockItem',
         content_type_field='consumed_by_model_type',
         object_id_field='consumed_by_model_id',
@@ -886,7 +886,7 @@ class StockConsumerMixin(ModelFeatureMixin, models.Model):
 
     def get_consumed_stock(self) -> QuerySet:
         """Return a queryset of all StockItem objects consumed by this instance."""
-        return self.consumed_stock_items.all()
+        return self.consumed_stock.all()
 
     def get_consuming_customer(self):
         """Return the customer (Company) which receives stock consumed by this instance.
@@ -895,6 +895,14 @@ class StockConsumerMixin(ModelFeatureMixin, models.Model):
         through stock items installed in other stock items.
         """
         return None
+
+    def get_consuming_customer_id(self) -> Optional[int]:
+        """Return the primary key of the customer which receives stock consumed by this instance.
+
+        Implementing classes may override this to avoid a database query.
+        """
+        customer = self.get_consuming_customer()
+        return customer.pk if customer else None
 
     def can_consume_stock(self, stock_item) -> bool:
         """Return True if this instance can consume the provided stock item.

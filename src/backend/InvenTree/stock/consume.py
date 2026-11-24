@@ -16,11 +16,13 @@ from collections.abc import Iterable
 from contextlib import ExitStack
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Optional
+from typing import Any, Optional
 
+from django.apps import apps
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Model
 from django.db.models.base import ModelState
 from django.utils.translation import gettext_lazy as _
 
@@ -38,8 +40,8 @@ from plugin.events import bulk_trigger_event, trigger_event
 from stock.events import StockEvents
 from stock.status_codes import StockHistoryCode
 
-if TYPE_CHECKING:
-    from stock.models import StockItem, StockLocation
+# Note: stock.models imports this module, so StockItem is resolved via the app registry
+# (and type annotations refer to the generic Model class)
 
 
 @dataclass
@@ -54,7 +56,7 @@ class ConsumeRequest:
         ref: Caller-defined handle (e.g. a BuildItem), returned with the result
     """
 
-    stock_item: 'StockItem'
+    stock_item: Model
     quantity: Decimal
     consumer: StockConsumerMixin
     deltas: dict = field(default_factory=dict)
@@ -74,8 +76,8 @@ class ConsumeResult:
     """
 
     ref: Any
-    item: 'StockItem'
-    source: 'StockItem'
+    item: Model
+    source: Model
     quantity: Decimal
     consumer: StockConsumerMixin
 
@@ -153,7 +155,8 @@ def consume_stock(
             consumed, or a stock item would consume itself
     """
     import part.tasks
-    from stock.models import StockItem
+
+    StockItem = apps.get_model('stock', 'StockItem')
 
     requests = list(requests)
 
@@ -248,7 +251,7 @@ def consume_stock(
             fully_consumed.add(item.pk)
 
         # Assign via the GenericForeignKey, which also caches the consumer
-        target.consumer = consumer
+        target.consumed_by = consumer
         target.location = None
 
         touched[item.pk] = item
@@ -278,7 +281,7 @@ def consume_stock(
         # Retain the cached related objects (avoid per-item lookups)
         copy_related_cache(source, new_item)
         copy_related_cache(source, new_items[idx])
-        new_items[idx].consumer = new_item.consumer
+        new_items[idx].consumed_by = new_item.consumed_by
 
     # Record the operation in the audit log - a single entry for each stock item
     with write_batched(), ExitStack() as events:
@@ -362,8 +365,8 @@ def consume_stock(
 
 @transaction.atomic
 def release_stock(
-    item: 'StockItem',
-    location: Optional['StockLocation'] = None,
+    item: Model,
+    location: Optional[Model] = None,
     *,
     user=None,
     quantity: Optional[Decimal] = None,
@@ -371,7 +374,8 @@ def release_stock(
     code: Optional[int] = None,
     notes: str = '',
     merge: bool = False,
-) -> 'StockItem':
+    deltas: Optional[dict] = None,
+) -> Model:
     """Return consumed stock back into inventory.
 
     Arguments:
@@ -384,6 +388,7 @@ def release_stock(
         code: The StockHistoryCode to record (default depends on the consumer)
         notes: Notes to record against the audit entry
         merge: If True, attempt to merge the returned stock back into its parent item
+        deltas: Additional audit deltas to record (e.g. {'returnorder': order})
 
     Returns:
         The returned StockItem (which may be a newly split-off item)
@@ -391,16 +396,25 @@ def release_stock(
     Raises:
         ValidationError: If the item has not been consumed, or the arguments are invalid
     """
-    from stock.models import StockItem
+    StockItem = apps.get_model('stock', 'StockItem')
 
     if not item.lock_quantity():
         raise ValidationError(_('Stock item no longer exists'))
+
+    # Re-read the consumer (the provided instance may be stale)
+    item.refresh_from_db(fields=['consumed_by_model_type', 'consumed_by_model_id'])
+
+    # A cached (None) consumer is not re-validated by the GenericForeignKey, so clear it
+    consumed_by = item._meta.get_field('consumed_by')
+
+    if consumed_by.is_cached(item):
+        consumed_by.delete_cached_value(item)
 
     if not item.is_consumed:
         raise ValidationError(_('Stock item has not been consumed'))
 
     # The consumer may have been deleted (KEEP policy), leaving a dangling reference
-    consumer = item.consumer
+    consumer = item.consumed_by
     consumer_model = ContentType.objects.get_for_id(
         item.consumed_by_model_type_id
     ).model_class()
@@ -434,6 +448,8 @@ def release_stock(
             else StockHistoryCode.RETURNED_TO_STOCK
         )
 
+    extra_deltas = deltas or {}
+
     deltas = {
         # A deleted consumer is recorded by its (dangling) primary key
         get_consumer_delta_key(consumer_model): consumer
@@ -444,6 +460,12 @@ def release_stock(
 
     if location:
         deltas['location'] = location
+
+    # Record the customer which the stock is returned from (e.g. via a SalesOrder)
+    if consumer is not None and (customer := consumer.get_consuming_customer()):
+        deltas.setdefault('customer', customer)
+
+    deltas.update(extra_deltas)
 
     if status is not None and not target.compare_status(status):
         old_custom_status = target.get_custom_status()

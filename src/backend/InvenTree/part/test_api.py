@@ -2559,7 +2559,7 @@ class PartAPIAggregationTest(InvenTreeAPITestCase):
 
         # Add another stock item which is assigned to a customer (and shouldn't count)
         customer = Company.objects.get(pk=4)
-        StockItem.objects.create(part=self.part, quantity=9999, customer=customer)
+        StockItem.objects.create(part=self.part, quantity=9999, consumed_by=customer)
 
         data = self.get_part_data()
 

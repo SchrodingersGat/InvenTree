@@ -183,7 +183,8 @@
     serial_int: 22
     expiry_date: "1990-10-10"
     status: 70
-    belongs_to: 105
+    consumed_by_model_type: [stock, stockitem]
+    consumed_by_model_id: 105
 
 # Multiple stock items for "Bob" (PK 100)
 - model: stock.stockitem

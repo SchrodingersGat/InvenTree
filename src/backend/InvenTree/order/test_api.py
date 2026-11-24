@@ -4369,7 +4369,7 @@ class ReturnOrderTests(InvenTreeAPITestCase):
         part = Part.objects.get(pk=25)
         for idx in range(3):
             stock_item = StockItem.objects.create(
-                part=part, customer=customer, quantity=1, serial=idx
+                part=part, consumed_by=customer, quantity=1, serial=idx
             )
 
             line_item = models.ReturnOrderLineItem.objects.create(
@@ -4446,8 +4446,11 @@ class ReturnOrderTests(InvenTreeAPITestCase):
 
         # Field changes are recorded as such (and not duplicated in the deltas)
         self.assertEqual(entry.changes_dict['status'][1], StockStatus.QUARANTINED)
-        self.assertEqual(entry.changes_dict['customer'], [customer.pk, None])
+        self.assertEqual(
+            entry.changes_dict['consumed_by_model_id'], [customer.pk, None]
+        )
         self.assertEqual(entry.changes_dict['location'][1], 1)
+        self.assertEqual(entry.additional_data['deltas']['customer']['pk'], customer.pk)
         self.assertEqual(entry.additional_data['deltas']['returnorder']['pk'], rma.pk)
 
     def test_receive_untracked(self):
@@ -4472,7 +4475,7 @@ class ReturnOrderTests(InvenTreeAPITestCase):
 
         for idx in range(2):
             stock_item = StockItem.objects.create(
-                part=part, customer=company, quantity=10
+                part=part, consumed_by=company, quantity=10
             )
 
             models.ReturnOrderLineItem.objects.create(
@@ -4535,7 +4538,9 @@ class ReturnOrderTests(InvenTreeAPITestCase):
 
         # An untracked item, where only part of the quantity is returned
         # (forces the stock item to be split on receipt)
-        stock_item = StockItem.objects.create(part=part, customer=company, quantity=10)
+        stock_item = StockItem.objects.create(
+            part=part, consumed_by=company, quantity=10
+        )
         line = models.ReturnOrderLineItem.objects.create(
             order=rma, item=stock_item, quantity=4
         )

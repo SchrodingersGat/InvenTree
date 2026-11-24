@@ -1416,7 +1416,6 @@ class SalesOrderAllocationMixin:
 
         queryset = queryset.prefetch_related(
             'item',
-            'item__sales_order',
             'item__part',
             'line__part',
             'item__location',
@@ -2274,7 +2273,6 @@ class TransferOrderAllocationMixin:
 
         queryset = queryset.prefetch_related(
             'item',
-            'item__sales_order',
             'item__part',
             'line__part',
             'item__location',

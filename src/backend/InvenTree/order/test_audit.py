@@ -448,7 +448,9 @@ class SalesOrderAuditTest(OrderAuditTestBase):
         self.assertEqual(
             shipped_entry.event_type, StockHistoryCode.SHIPPED_AGAINST_SALES_ORDER
         )
-        self.assertEqual(shipped_entry.changes_dict['customer'][1], self.customer.pk)
+        self.assertEqual(
+            shipped_entry.additional_data['deltas']['customer']['pk'], self.customer.pk
+        )
 
 
 class ReturnOrderAuditTest(OrderAuditTestBase):
@@ -468,7 +470,7 @@ class ReturnOrderAuditTest(OrderAuditTestBase):
             name='Returned Widget', description='A widget', salable=True
         )
         cls.item = StockItem.objects.create(
-            part=cls.part, quantity=1, serial='RMA-1', customer=cls.customer
+            part=cls.part, quantity=1, serial='RMA-1', consumed_by=cls.customer
         )
 
         cls.order = models.ReturnOrder.objects.create(

@@ -1,7 +1,5 @@
 """Order model definitions."""
 
-import copy
-from contextlib import ExitStack
 from decimal import Decimal
 from typing import Any, Optional, TypedDict
 
@@ -10,7 +8,6 @@ from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models, transaction
 from django.db.models import F, Q, QuerySet, Sum
-from django.db.models.base import ModelState
 from django.db.models.functions import Coalesce
 from django.db.models.signals import post_delete, post_save
 from django.dispatch.dispatcher import receiver
@@ -32,13 +29,7 @@ import order.validators
 import report.mixins
 import stock.models
 import users.models as UserModels
-from audit.helpers import (
-    audit_event,
-    audited_bulk_update,
-    copy_related_cache,
-    record_created,
-    write_batched,
-)
+from audit.helpers import audited_bulk_update, copy_related_cache
 from build.status_codes import BuildStatus
 from common.currency import currency_code_default
 from common.notifications import InvenTreeNotificationBodies
@@ -1537,6 +1528,10 @@ class SalesOrder(StockConsumerMixin, AuditedOrderMixin, TotalPriceMixin, Order):
         """Stock shipped against this order is received by the order customer."""
         return self.customer
 
+    def get_consuming_customer_id(self):
+        """Return the primary key of the order customer (without a database query)."""
+        return self.customer_id
+
     def get_absolute_url(self) -> str:
         """Get the 'web' URL for this order."""
         return pui_url(f'/sales/sales-order/{self.pk}')
@@ -2697,7 +2692,7 @@ class SalesOrderLineItem(AuditedLineItemMixin, OrderLineItem):
         if not self.pk:
             return 0
 
-        query = self.order.stock_items.filter(part=self.part).aggregate(
+        query = self.order.consumed_stock.filter(part=self.part).aggregate(
             fulfilled=Coalesce(Sum('quantity'), Decimal(0))
         )
 
@@ -3004,32 +2999,19 @@ class SalesOrderShipment(
             user: The user completing the allocations
 
         Notes:
-            This unrolls what would otherwise be a per-allocation call, so that the underlying
-            StockItem, audit log, SalesOrderLineItem and SalesOrderAllocation writes can
-            be batched into a handful of bulk queries instead of several per allocation.
+            The stock is consumed via stock.consume.consume_stock() (batched), and the
+            SalesOrderLineItem and SalesOrderAllocation writes are likewise batched.
         """
-        import part.tasks
+        from stock.consume import ConsumeRequest, consume_stock
 
         order = self.order
         customer = order.customer
 
         # Preselect related fields to avoid per-row database queries below
-        allocations = list(allocations.select_related('line', 'item', 'item__part'))
+        allocations = list(allocations.select_related('line', 'item'))
 
-        # Lock the distinct StockItem rows (in pk order, to avoid deadlocks) and
-        # re-read their quantities, so the arithmetic below operates on the
-        # current committed values. Stock adjustments elsewhere lock these
-        # same rows, so concurrent adjustments cannot be silently overwritten.
-        locked_quantities = dict(
-            stock.models.StockItem.objects
-            .select_for_update()
-            .filter(pk__in={allocation.item_id for allocation in allocations})
-            .order_by('pk')
-            .values_list('pk', 'quantity')
-        )
-
-        # Likewise, lock the distinct SalesOrderLineItem rows and re-read their
-        # 'shipped' quantities: another shipment against the same line may be
+        # Lock the distinct SalesOrderLineItem rows and re-read their 'shipped'
+        # quantities: another shipment against the same line may be
         # completed concurrently, and each must add to the latest value
         locked_shipped = dict(
             SalesOrderLineItem.objects
@@ -3039,12 +3021,24 @@ class SalesOrderShipment(
             .values_list('pk', 'shipped')
         )
 
-        split_items = []  # (source_item, new_item, quantity) - stock to split off
-        shipped_items = []  # (target_item, quantity) - stock to mark as shipped
+        # The stock is consumed by the SalesOrder (the customer is derived from the order)
+        results = consume_stock(
+            [
+                ConsumeRequest(
+                    allocation.item,
+                    allocation.quantity,
+                    order,
+                    deltas={'customer': customer} if customer else {},
+                    ref=allocation,
+                )
+                for allocation in allocations
+            ],
+            user=user,
+        )
 
-        # Canonical (mutable) copy of each distinct StockItem being drawn from - multiple
-        # allocations may draw from the same StockItem, so track running state
-        seen_stock_items: dict = {}
+        # Nothing to do?
+        if not results:
+            return
 
         # Track the lines which have already been processed, to avoid double counting
         seen_lines: dict = {}
@@ -3052,44 +3046,12 @@ class SalesOrderShipment(
         # Allocations whose 'item' now points at a newly-split-off StockItem
         allocations_to_update = []
 
-        for allocation in allocations:
-            stock_item = seen_stock_items.get(allocation.item_id) or allocation.item
-            quantity = allocation.quantity
+        for result in results:
+            allocation = result.ref
 
-            if (locked_qty := locked_quantities.pop(stock_item.pk, None)) is not None:
-                # First encounter: refresh the quantity from the locked database row
-                stock_item.quantity = locked_qty
-            elif stock_item.pk not in seen_stock_items:
-                # The stock item no longer exists in the database - skip
-                continue
-
-            seen_stock_items[stock_item.pk] = stock_item
-
-            if quantity < stock_item.quantity:
-                # Split off exactly the shipped quantity into a new StockItem,
-                # leaving the remainder in place as available stock
-                new_item = copy.copy(stock_item)
-                new_item._state = ModelState()
-                new_item.pk = None
-                new_item.quantity = quantity
-                new_item.parent = stock_item
-
-                stock_item.quantity -= quantity
-
-                target_item = new_item
-                split_items.append((stock_item, new_item, quantity))
-
-                allocation.item = new_item
+            if result.item.pk != allocation.item_id:
+                allocation.item = result.item
                 allocations_to_update.append(allocation)
-            else:
-                target_item = stock_item
-
-            # Resolve the final resting state of the target item now
-            target_item.sales_order = order
-            target_item.customer = customer
-            target_item.location = None
-
-            shipped_items.append((target_item, quantity))
 
             # Increase the "shipped" quantity for the associated line
             line = seen_lines.get(allocation.line_id)
@@ -3099,92 +3061,8 @@ class SalesOrderShipment(
                 line = allocation.line
                 line.shipped = locked_shipped.get(line.pk, line.shipped)
 
-            line.shipped += quantity
+            line.shipped += result.quantity
             seen_lines[line.pk] = line
-
-        # Nothing to do?
-        if not seen_stock_items:
-            return
-
-        # Bulk-create the newly split-off stock items - this resolves their primary keys,
-        # which the tracking entries below need
-        new_stock_item_data = [new_item for _, new_item, _ in split_items]
-
-        # Evaluate the queryset immediately (into a list) - otherwise, indexing into it
-        # below would re-query the database once per split item
-        new_stock_items = list(
-            bulk_create_and_fetch(stock.models.StockItem, new_stock_item_data)
-        )
-
-        # Backfill the newly created StockItem objects into the split_items list,
-        # then repoint every other reference to a placeholder (pk=None) copy at the
-        # newly persisted instance instead - shipped_items and allocations_to_update
-        # were populated with the pre-creation copies, which never gain a primary key
-        split_item_map = {}
-
-        for i, (source, placeholder, quantity) in enumerate(split_items):
-            persisted = new_stock_items[i]
-
-            # Retain the cached related objects (avoid per-item lookups)
-            copy_related_cache(source, persisted)
-
-            split_item_map[id(placeholder)] = persisted
-            split_items[i] = (source, persisted, quantity)
-
-        shipped_items = [
-            (split_item_map.get(id(item), item), quantity)
-            for item, quantity in shipped_items
-        ]
-
-        for allocation in allocations_to_update:
-            allocation.item = split_item_map[id(allocation.item)]
-
-        split_events = [
-            ((), {'id': new_item.pk, 'parent': source_item.pk})
-            for source_item, new_item, _quantity in split_items
-        ]
-
-        customer_events = [
-            ((), {'id': target_item.pk, 'customer': customer.pk if customer else None})
-            for target_item, _quantity in shipped_items
-        ]
-
-        # Record the operation in the audit log - a single entry for each stock item
-        with write_batched(), ExitStack() as events:
-
-            def audit(item, code, deltas):
-                """Record a named event against the provided stock item."""
-                events.enter_context(audit_event(item, code, deltas=deltas, actor=user))
-
-            for source_item, new_item, quantity in split_items:
-                audit(
-                    source_item,
-                    StockHistoryCode.SPLIT_CHILD_ITEM,
-                    {
-                        'stockitem': new_item,
-                        'removed': quantity,
-                        'quantity': source_item.quantity,
-                    },
-                )
-
-            for target_item, quantity in shipped_items:
-                audit(
-                    target_item,
-                    StockHistoryCode.SHIPPED_AGAINST_SALES_ORDER,
-                    {'quantity': quantity, 'salesorder': order, 'customer': customer},
-                )
-
-            # Newly split items are recorded as created (with the shipment event)
-            record_created(stock.models.StockItem, new_stock_items)
-
-            # Flush all StockItem field changes (quantity reductions, and shipment details)
-            # Note: Newly split items were created with their final state (no update required),
-            # and any other shipped item is one of the (existing) items drawn from
-            audited_bulk_update(
-                stock.models.StockItem,
-                list(seen_stock_items.values()),
-                ['quantity', 'sales_order', 'customer', 'location'],
-            )
 
         # Update sales order lines for "seen_lines"
         audited_bulk_update(SalesOrderLineItem, list(seen_lines.values()), ['shipped'])
@@ -3193,21 +3071,19 @@ class SalesOrderShipment(
         if allocations_to_update:
             SalesOrderAllocation.objects.bulk_update(allocations_to_update, ['item'])
 
-        # Queue the ITEM_SPLIT / ITEM_ASSIGNED_TO_CUSTOMER plugin events in bulk,
-        # rather than one offload_task() call (and one OrmQ insert) per item
-        bulk_trigger_event(StockEvents.ITEM_SPLIT, split_events)
-        bulk_trigger_event(StockEvents.ITEM_ASSIGNED_TO_CUSTOMER, customer_events)
-
-        # bulk_update()/bulk_create() above do not fire StockItem's post_save signal,
-        # which normally triggers a low-stock check for the affected part - so queue
-        # that check explicitly, once per distinct part touched by this call
-        touched_part_ids = {item.part_id for item in seen_stock_items.values()}
-
-        InvenTree.tasks.bulk_offload_task(
-            part.tasks.notify_low_stock_if_required,
-            [((part_id,), {}) for part_id in touched_part_ids],
-            group='notification',
-            force_async=True,
+        # Queue the (legacy) ITEM_ASSIGNED_TO_CUSTOMER plugin events in bulk
+        bulk_trigger_event(
+            StockEvents.ITEM_ASSIGNED_TO_CUSTOMER,
+            [
+                (
+                    (),
+                    {
+                        'id': result.item.pk,
+                        'customer': customer.pk if customer else None,
+                    },
+                )
+                for result in results
+            ],
         )
 
     @transaction.atomic
@@ -3392,8 +3268,7 @@ class SalesOrderAllocation(models.Model):
         limit_choices_to={
             'part__salable': True,
             'part__virtual': False,
-            'belongs_to': None,
-            'sales_order': None,
+            'consumed_by_model_type': None,
         },
         verbose_name=_('Item'),
         help_text=_('Select stock item to allocate'),
@@ -3711,29 +3586,41 @@ class ReturnOrder(AuditedOrderMixin, TotalPriceMixin, Order):
         if status is None:
             status = StockStatus.QUARANTINED.value
 
-        deltas = {
-            'status': status,
-            'returnorder': self,
-            'location': location,
-            'quantity': float(line.quantity),
-        }
+        notes = kwargs.get('note', '')
 
-        if stock_item.customer:
-            deltas['customer'] = stock_item.customer
+        if stock_item.consumer_model in (SalesOrder, Company):
+            # Return the stock item from the customer, back into stock
+            # (a partial quantity has already been split off, above)
+            from stock.consume import release_stock
 
-        # Update the StockItem
-        stock_item.set_status(status)
-        stock_item.location = location
-        stock_item.customer = None
-        stock_item.sales_order = None
+            release_stock(
+                stock_item,
+                location,
+                user=user,
+                status=status,
+                code=StockHistoryCode.RETURNED_AGAINST_RETURN_ORDER,
+                notes=notes,
+                deltas={'returnorder': self},
+            )
+        else:
+            deltas = {
+                'status': status,
+                'returnorder': self,
+                'location': location,
+                'quantity': float(line.quantity),
+            }
 
-        with stock_item.tracking_event(
-            StockHistoryCode.RETURNED_AGAINST_RETURN_ORDER,
-            user,
-            notes=kwargs.get('note', ''),
-            deltas=deltas,
-        ):
-            stock_item.save(add_note=False)
+            # Update the StockItem
+            stock_item.set_status(status)
+            stock_item.location = location
+
+            with stock_item.tracking_event(
+                StockHistoryCode.RETURNED_AGAINST_RETURN_ORDER,
+                user,
+                notes=notes,
+                deltas=deltas,
+            ):
+                stock_item.save(add_note=False)
 
         stock_item.clearAllocations()
 
@@ -4392,11 +4279,7 @@ class TransferOrderAllocation(models.Model):
         'stock.StockItem',
         on_delete=models.CASCADE,
         related_name='transfer_order_allocations',
-        limit_choices_to={
-            'part__virtual': False,
-            'belongs_to': None,
-            'sales_order': None,
-        },
+        limit_choices_to={'part__virtual': False, 'consumed_by_model_type': None},
         verbose_name=_('Item'),
         help_text=_('Select stock item to allocate'),
     )

@@ -233,7 +233,9 @@ class BuildStockAuditTest(BuildTestBase):
         [entry] = self.stock_entries(self.stock_1_1, n_1)
 
         self.assertEqual(entry.event_type, StockHistoryCode.BUILD_CONSUMED)
-        self.assertEqual(entry.changes_dict['consumed_by'], [None, self.build.pk])
+        self.assertEqual(
+            entry.changes_dict['consumed_by_model_id'], [None, self.build.pk]
+        )
         self.assertEqual(entry.actor, self.user)
 
         # Partially consumed item (split)
@@ -249,7 +251,7 @@ class BuildStockAuditTest(BuildTestBase):
 
         self.assertEqual(entry.action, ACTION.CREATE)
         self.assertEqual(entry.event_type, StockHistoryCode.BUILD_CONSUMED)
-        self.assertEqual(entry.changes_dict['consumed_by'][1], self.build.pk)
+        self.assertEqual(entry.changes_dict['consumed_by_model_id'][1], self.build.pk)
 
     def test_complete_output(self):
         """Completing a build output records a single entry."""
@@ -322,7 +324,9 @@ class BuildStockAuditTest(BuildTestBase):
         [entry] = self.stock_entries(component, n_component)
 
         self.assertEqual(entry.event_type, StockHistoryCode.INSTALLED_INTO_ASSEMBLY)
-        self.assertEqual(entry.changes_dict['belongs_to'], [None, self.output_1.pk])
+        self.assertEqual(
+            entry.changes_dict['consumed_by_model_id'], [None, self.output_1.pk]
+        )
         self.assertEqual(
             entry.additional_data['deltas']['buildorder']['pk'], self.build.pk
         )

@@ -1,8 +1,6 @@
 """Build database model definitions."""
 
-import copy
 import decimal
-from contextlib import ExitStack
 from typing import Optional, TypedDict
 
 from django.contrib.auth.models import User
@@ -10,7 +8,6 @@ from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models, transaction
 from django.db.models import F, Q, QuerySet, Sum
-from django.db.models.base import ModelState
 from django.db.models.functions import Coalesce
 from django.db.models.signals import post_save
 from django.dispatch.dispatcher import receiver
@@ -31,13 +28,6 @@ import part.models
 import report.mixins
 import stock.models
 import users.models
-from audit.helpers import (
-    audit_event,
-    audited_bulk_update,
-    copy_related_cache,
-    record_created,
-    write_batched,
-)
 from build.events import BuildEvents
 from build.filters import annotate_allocated_quantity, annotate_required_quantity
 from build.status_codes import BuildStatus, BuildStatusGroups
@@ -71,9 +61,9 @@ from generic.states import (
     deprecated,
     inventree_transition,
 )
-from InvenTree.helpers_db import bulk_create_and_fetch
 from plugin.base.integration.AllocateMixin import apply_allocate_mixin
 from plugin.events import bulk_trigger_event, trigger_event
+from stock.consume import ConsumeRequest, consume_stock
 from stock.events import StockEvents
 from stock.status_codes import StockHistoryCode, StockStatus
 
@@ -713,12 +703,9 @@ class Build(
                 already-reduced quantities and does nothing.
 
         Notes:
-            This unrolls what would otherwise be a per-BuildItem call, so that the underlying StockItem,
-            audit log, BuildLine and BuildItem writes can be batched into
-            a handful of bulk queries instead of several per build item.
+            The stock is consumed via stock.consume.consume_stock() (batched), and the
+            BuildLine and BuildItem writes are likewise batched into bulk queries.
         """
-        import part.tasks
-
         notes = notes or ''
         quantities = quantities or {}
 
@@ -731,15 +718,7 @@ class Build(
         # Preselect related fields to avoid per-row database queries below
         build_items = list(
             build_items.select_related(
-                'build_line',
-                'stock_item',
-                'stock_item__part',
-                'stock_item__location',
-                'stock_item__purchase_order__supplier',
-                'install_into',
-                'install_into__part',
-                'install_into__location',
-                'install_into__purchase_order__supplier',
+                'build_line', 'stock_item', 'stock_item__part', 'install_into'
             )
         )
 
@@ -766,25 +745,44 @@ class Build(
                 )
                 build_items = [item for item in build_items if item.pk not in stale]
 
-        # Lock the distinct StockItem rows (in pk order, to avoid deadlocks) and
-        # re-read their quantities, so the clamping arithmetic below operates on
-        # the current committed values. Stock adjustments elsewhere lock these
-        # same rows, so concurrent adjustments cannot be silently overwritten.
-        locked_quantities = dict(
-            stock.models.StockItem.objects
-            .select_for_update()
-            .filter(pk__in={item.stock_item_id for item in build_items})
-            .order_by('pk')
-            .values_list('pk', 'quantity')
-        )
+        requests = []
 
-        split_items = []  # (source_item, new_item, quantity) - stock to split off
-        install_items = []  # (build_item, target_item, output, quantity) - stock to install
-        consume_items = []  # (target_item, quantity) - stock to mark as consumed
+        for build_item in build_items:
+            quantity = quantities.get(build_item.pk, build_item.quantity)
 
-        # Canonical (mutable) copy of each distinct StockItem being drawn from - multiple
-        # build items may allocate against the same StockItem, so track running state
-        seen_stock_items: dict = {}
+            if not isinstance(quantity, decimal.Decimal):
+                # Avoid float -> Decimal precision artifacts (e.g. Decimal(0.1))
+                quantity = decimal.Decimal(str(quantity))
+
+            # Clamp to the quantity allocated by this build item
+            # (consume_stock() further clamps to the quantity remaining in the stock item)
+            quantity = max(decimal.Decimal(0), min(quantity, build_item.quantity))
+
+            if quantity <= 0:
+                continue
+
+            stock_item = build_item.stock_item
+
+            if stock_item.part.trackable and build_item.install_into_id:
+                # Trackable stock is installed into the build output,
+                # and the build order is recorded in the audit log
+                consumer = build_item.install_into
+                deltas = {'buildorder': self}
+            else:
+                consumer = self
+                deltas = {}
+
+            requests.append(
+                ConsumeRequest(
+                    stock_item, quantity, consumer, deltas=deltas, ref=build_item
+                )
+            )
+
+        results = consume_stock(requests, user=user, notes=notes)
+
+        # Nothing to do?
+        if not results:
+            return
 
         # Track the build items and build lines which have already been processed, to avoid double counting
         seen_build_items: dict = {}
@@ -794,175 +792,34 @@ class Build(
         # This is because the required quantity may be less than the allocated quantity, and we need to split the allocation
         build_items_to_remove = set()
 
-        for build_item in build_items:
+        install_events = []
+
+        for result in results:
+            build_item = result.ref
             build_line = build_item.build_line
-
-            stock_item = (
-                seen_stock_items.get(build_item.stock_item_id) or build_item.stock_item
-            )
-
-            if (locked_qty := locked_quantities.pop(stock_item.pk, None)) is not None:
-                # First encounter: refresh the quantity from the locked database row
-                stock_item.quantity = locked_qty
-            elif stock_item.pk not in seen_stock_items:
-                # The stock item no longer exists in the database - skip
-                continue
-
-            quantity = quantities.get(build_item.pk, build_item.quantity)
-
-            if not isinstance(quantity, decimal.Decimal):
-                # Avoid float -> Decimal precision artifacts (e.g. Decimal(0.1))
-                quantity = decimal.Decimal(str(quantity))
-
-            # Clamp to the maximum quantity available for this build item and stock item
-            quantity = max(
-                decimal.Decimal(0),
-                min(quantity, build_item.quantity, stock_item.quantity),
-            )
-
-            if quantity <= 0:
-                continue
-
-            # Register this StockItem as "seen" now that we know it will be touched
-            seen_stock_items[stock_item.pk] = stock_item
-
-            trackable_install = stock_item.part.trackable and build_item.install_into_id
-            output = build_item.install_into if trackable_install else None
-
-            if quantity < stock_item.quantity:
-                # Split off exactly the consumed quantity into a new StockItem,
-                # leaving the remainder in place as available stock
-                new_item = copy.copy(stock_item)
-                new_item._state = ModelState()
-                new_item.pk = None
-                new_item.quantity = quantity
-                new_item.parent = stock_item
-
-                stock_item.quantity -= quantity
-
-                target_item = new_item
-                split_items.append((stock_item, new_item, quantity))
-            else:
-                target_item = stock_item
-
-            # Resolve the final resting state of the target item now - it may not have a
-            # primary key yet (if newly split), so this cannot depend on any pk lookups
-            target_item.consumed_by = self
-            target_item.location = None
-
-            if trackable_install:
-                target_item.belongs_to = output
-                install_items.append((build_item, target_item, output, quantity))
-            else:
-                consume_items.append((target_item, quantity))
 
             # Increase the "consumed" quantity for the build line
             _line = seen_build_lines.get(build_line.pk) or build_line
-            _line.consumed += quantity
+            _line.consumed += result.quantity
             seen_build_lines[build_line.pk] = _line
 
             # Decrease the "quantity" for the build item
             _item = seen_build_items.get(build_item.pk) or build_item
-            _item.quantity = max(decimal.Decimal(0), _item.quantity - quantity)
+            _item.quantity = max(decimal.Decimal(0), _item.quantity - result.quantity)
             seen_build_items[build_item.pk] = _item
+
+            if isinstance(result.consumer, stock.models.StockItem):
+                # Ensure the build item points to the (possibly newly split) installed item
+                _item.stock_item = result.item
+
+                install_events.append((
+                    (),
+                    {'id': result.item.pk, 'assembly_id': result.consumer.pk},
+                ))
 
             # If the total item quantity is now zero, we can remove the build item from the database
             if _item.quantity <= 0:
                 build_items_to_remove.add(_item.pk)
-
-        # Nothing to do?
-        if not seen_build_items:
-            return
-
-        # Bulk-create the newly split-off stock items - this resolves their primary keys,
-        # which the tracking entries and (for installed items) BuildItem records need below
-        new_stock_item_data = [new_item for _, new_item, _ in split_items]
-
-        # Evaluate the queryset immediately (into a list) - otherwise, indexing into it
-        # below would re-query the database once per split item
-        new_stock_items = list(
-            bulk_create_and_fetch(stock.models.StockItem, new_stock_item_data)
-        )
-
-        # Back-populate the resolved primary keys onto the original 'new_item' objects
-        # (in-place, not via replacement) since 'install_items' / 'consume_items' hold
-        # references to these same objects (as 'target_item') and must see the
-        # resolved pk too. On backends that can't return pks from bulk_create (MySQL),
-        # 'new_stock_items' are freshly-fetched, distinct objects, so a plain list
-        # replacement here would leave those other references with pk=None.
-        for i, (source_item, new_item, _quantity) in enumerate(split_items):
-            new_item.pk = new_stock_items[i].pk
-            new_item._state.adding = False
-
-            # Retain the cached related objects (avoid per-item lookups)
-            copy_related_cache(source_item, new_item)
-            copy_related_cache(source_item, new_stock_items[i])
-
-        split_events = []
-        install_events = []
-
-        # Split stock items for "split_items"
-        for source_item, new_item, _quantity in split_items:
-            split_events.append(((), {'id': new_item.pk, 'parent': source_item.pk}))
-
-        # Install stock items for "install_items"
-        for build_item, target_item, output, _quantity in install_items:
-            install_events.append((
-                (),
-                {'id': target_item.pk, 'assembly_id': output.pk},
-            ))
-
-            # Ensure the build item points to the (possibly newly split) stock item
-            build_item.stock_item = target_item
-
-        # Record the operation in the audit log - a single entry for each stock item
-        with write_batched(), ExitStack() as events:
-
-            def audit(item, code, deltas):
-                """Record a named event against the provided stock item."""
-                events.enter_context(
-                    audit_event(item, code, notes=notes, deltas=deltas, actor=user)
-                )
-
-            for source_item, new_item, quantity in split_items:
-                audit(
-                    source_item,
-                    StockHistoryCode.SPLIT_CHILD_ITEM,
-                    {
-                        'stockitem': new_item,
-                        'removed': quantity,
-                        'quantity': source_item.quantity,
-                    },
-                )
-
-            for _build_item, target_item, output, quantity in install_items:
-                audit(
-                    target_item,
-                    StockHistoryCode.INSTALLED_INTO_ASSEMBLY,
-                    {'stockitem': output, 'quantity': quantity, 'buildorder': self},
-                )
-                audit(
-                    output,
-                    StockHistoryCode.INSTALLED_CHILD_ITEM,
-                    {'stockitem': target_item, 'quantity': quantity},
-                )
-
-            for target_item, quantity in consume_items:
-                audit(
-                    target_item,
-                    StockHistoryCode.BUILD_CONSUMED,
-                    {'buildorder': self, 'quantity': quantity},
-                )
-
-            # Newly split items are recorded as created (with the consume / install event)
-            record_created(stock.models.StockItem, new_stock_items)
-
-            # Flush all StockItem field changes (quantity reductions, consumption, installs)
-            audited_bulk_update(
-                stock.models.StockItem,
-                list(seen_stock_items.values()),
-                ['quantity', 'consumed_by', 'location', 'belongs_to'],
-            )
 
         # Update build lines for "seen_build_lines"
         BuildLine.objects.bulk_update(seen_build_lines.values(), ['consumed'])
@@ -978,22 +835,8 @@ class Build(
         # Remove build items in "build_items_to_remove"
         BuildItem.objects.filter(pk__in=build_items_to_remove).delete()
 
-        # Queue the ITEM_SPLIT / ITEM_INSTALLED_INTO_ASSEMBLY plugin events in bulk,
-        # rather than one offload_task() call (and one OrmQ insert) per item
-        bulk_trigger_event(StockEvents.ITEM_SPLIT, split_events)
+        # Queue the (legacy) ITEM_INSTALLED_INTO_ASSEMBLY plugin events in bulk
         bulk_trigger_event(StockEvents.ITEM_INSTALLED_INTO_ASSEMBLY, install_events)
-
-        # bulk_update()/bulk_create() above do not fire StockItem's post_save signal,
-        # which normally triggers a low-stock check for the affected part - so queue
-        # that check explicitly, once per distinct part touched by this call
-        touched_part_ids = {item.part_id for item in seen_stock_items.values()}
-
-        InvenTree.tasks.bulk_offload_task(
-            part.tasks.notify_low_stock_if_required,
-            [((part_id,), {}) for part_id in touched_part_ids],
-            group='notification',
-            force_async=True,
-        )
 
     @transaction.atomic
     def complete_outstanding_allocations(self, user) -> None:
@@ -2544,7 +2387,7 @@ class BuildItem(InvenTreeMetadataModel):
         related_name='allocations',
         verbose_name=_('Stock Item'),
         help_text=_('Source stock item'),
-        limit_choices_to={'sales_order': None, 'belongs_to': None},
+        limit_choices_to={'consumed_by_model_type': None},
     )
 
     quantity = models.DecimalField(
