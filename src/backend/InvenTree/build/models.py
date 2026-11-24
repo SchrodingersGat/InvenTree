@@ -50,6 +50,7 @@ from common.settings import get_global_setting
 from generic.enums import StringEnum
 from generic.models.base import InvenTreeMetadataModel, InvenTreeModel, InvenTreeTree
 from generic.models.modelmixins import (
+    ConsumedStockPolicy,
     InvenTreeAttachmentMixin,
     InvenTreeAuditMixin,
     InvenTreeBarcodeMixin,
@@ -59,6 +60,7 @@ from generic.models.modelmixins import (
     InvenTreePluginValidationMixin,
     InvenTreeReferenceIndexingMixin,
     InvenTreeTagsMixin,
+    StockConsumerMixin,
 )
 from generic.states import (
     DEFERRABLE,
@@ -112,6 +114,7 @@ class Build(
     InvenTreeNoteMixin,
     InvenTreeTagsMixin,
     InvenTreeReferenceIndexingMixin,
+    StockConsumerMixin,
     StateTransitionMixin,
     StatusCodeMixin,
     InvenTreeMetadataMixin,
@@ -142,6 +145,11 @@ class Build(
     """
 
     STATUS_CLASS = BuildStatus
+
+    # Stock consumed by a build order is deleted along with the build order
+    CONSUMED_STOCK_ON_DELETE = ConsumedStockPolicy.CASCADE
+    STOCK_CONSUMED_EVENT = 'BUILD_CONSUMED'
+    STOCK_CONSUMED_DELTA_KEY = 'buildorder'
     IMPORT_ID_FIELDS = ['reference']
 
     class Meta:

@@ -8,7 +8,7 @@ from typing import Any, Optional
 from django.contrib.contenttypes.fields import GenericRelation
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
-from django.db import models, transaction
+from django.db import DEFAULT_DB_ALIAS, models, transaction
 from django.db.models import QuerySet
 from django.urls import resolve
 from django.utils.translation import gettext_lazy as _
@@ -811,6 +811,98 @@ class InvenTreeNoteMixin(
         """Run a check to determine if the provided note can be saved.
 
         The default implementation always returns True, but this can be overridden in the implementing class.
+        """
+        return True
+
+
+class ConsumedStockPolicy(models.TextChoices):
+    """What happens to consumed stock when its consumer is deleted.
+
+    CASCADE: The consumed stock items are deleted along with the consumer
+    PROTECT: The consumer cannot be deleted while it holds consumed stock
+    """
+
+    CASCADE = 'cascade', _('Cascade')
+    PROTECT = 'protect', _('Protect')
+
+
+class ConsumedStockRelation(GenericRelation):
+    """Reverse generic relation from a stock consumer to the StockItem objects it has consumed.
+
+    Applies the CONSUMED_STOCK_ON_DELETE policy of the consumer model when it is deleted:
+    - CASCADE: The consumed stock items are deleted along with the consumer
+    - PROTECT: Deletion is refused while consumed stock items exist
+
+    The policy is applied while the deletion Collector gathers related objects
+    (as for on_delete=PROTECT), i.e. before the delete transaction starts. This also
+    covers QuerySet.delete(), and does not poison an enclosing transaction.
+    """
+
+    def bulk_related_objects(self, objs, using=DEFAULT_DB_ALIAS):
+        """Return the consumed stock items to cascade-delete, or refuse the deletion."""
+        queryset = super().bulk_related_objects(objs, using=using)
+
+        policy = getattr(self.model, 'CONSUMED_STOCK_ON_DELETE', None)
+
+        if policy == ConsumedStockPolicy.PROTECT and queryset.exists():
+            raise ValidationError(
+                _('Cannot delete {model}, as it has consumed stock items').format(
+                    model=self.model._meta.verbose_name
+                )
+            )
+
+        return queryset
+
+
+class StockConsumerMixin(ModelFeatureMixin, models.Model):
+    """Marks a model as able to "consume" stock items.
+
+    A consumed StockItem references its consumer via a generic relation
+    (StockItem.consumed_by_model_type / consumed_by_model_id), and is no longer
+    available stock. Consumption is performed via stock.consume.consume_stock().
+
+    Implementing classes declare:
+    - CONSUMED_STOCK_ON_DELETE: The ConsumedStockPolicy applied when the consumer is deleted
+    - STOCK_CONSUMED_EVENT: Name of the StockHistoryCode recorded when stock is consumed
+    - STOCK_CONSUMED_DELTA_KEY: Key under which the consumer is recorded in the audit deltas
+
+    The delete policy is applied by the ConsumedStockRelation field.
+    """
+
+    MODEL_FEATURE = 'org.inventree.i.modelfeatures.consumes_stock'
+
+    CONSUMED_STOCK_ON_DELETE: ConsumedStockPolicy = ConsumedStockPolicy.PROTECT
+    STOCK_CONSUMED_EVENT: Optional[str] = None
+    STOCK_CONSUMED_DELTA_KEY: Optional[str] = None
+
+    class Meta:
+        """Metaclass options for StockConsumerMixin."""
+
+        abstract = True
+
+    # Reverse relation to the StockItem objects consumed by this instance
+    consumed_stock_items = ConsumedStockRelation(
+        'stock.StockItem',
+        content_type_field='consumed_by_model_type',
+        object_id_field='consumed_by_model_id',
+    )
+
+    def get_consumed_stock(self) -> QuerySet:
+        """Return a queryset of all StockItem objects consumed by this instance."""
+        return self.consumed_stock_items.all()
+
+    def get_consuming_customer(self):
+        """Return the customer (Company) which receives stock consumed by this instance.
+
+        Only direct consumers are considered - there is no recursion
+        through stock items installed in other stock items.
+        """
+        return None
+
+    def can_consume_stock(self, stock_item) -> bool:
+        """Return True if this instance can consume the provided stock item.
+
+        Override in the implementing class to add consumer-specific checks.
         """
         return True
 

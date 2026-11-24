@@ -11,6 +11,8 @@ from decimal import Decimal, InvalidOperation
 
 from django.conf import settings
 from django.contrib.auth.models import User
+from django.contrib.contenttypes.fields import GenericForeignKey
+from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models, transaction
@@ -42,6 +44,7 @@ from company import models as CompanyModels
 from generic.enums import StringEnum
 from generic.models.base import InvenTreeMetadataModel, InvenTreeTree
 from generic.models.modelmixins import (
+    ConsumedStockPolicy,
     InvenTreeAttachmentMixin,
     InvenTreeAuditMixin,
     InvenTreeBarcodeMixin,
@@ -51,6 +54,7 @@ from generic.models.modelmixins import (
     InvenTreePathStringMixin,
     InvenTreePluginValidationMixin,
     InvenTreeTagsMixin,
+    StockConsumerMixin,
 )
 from generic.states import StatusCodeMixin
 from generic.states.fields import InvenTreeCustomStatusModelField
@@ -450,6 +454,7 @@ class StockItem(
     InvenTreeBarcodeMixin,
     InvenTreeNoteMixin,
     InvenTreeTagsMixin,
+    StockConsumerMixin,
     StatusCodeMixin,
     report.mixins.InvenTreeReportMixin,
     common.models.MetaMixin,
@@ -478,12 +483,19 @@ class StockItem(
         is_building: Boolean field indicating if this stock item is currently being built (or is "in production")
         purchase_order: Link to a PurchaseOrder (if this stock item was created from a PurchaseOrder)
         sales_order: Link to a SalesOrder object (if the StockItem has been assigned to a SalesOrder)
+        consumed_by_model_type: Model type of the object which has consumed this StockItem (generic relation)
+        consumed_by_model_id: Primary key of the object which has consumed this StockItem (generic relation)
         purchase_price: The unit purchase price for this StockItem - this is the unit price at time of purchase (if this item was purchased from an external supplier)
         packaging: Description of how the StockItem is packaged (e.g. "reel", "loose", "tape" etc)
     """
 
     IMPORT_ID_FIELDS = ['serial']
     STATUS_CLASS = StockStatus
+
+    # A StockItem can consume (have installed in it) other stock items
+    CONSUMED_STOCK_ON_DELETE = ConsumedStockPolicy.CASCADE
+    STOCK_CONSUMED_EVENT = 'INSTALLED_INTO_ASSEMBLY'
+    STOCK_CONSUMED_DELTA_KEY = 'stockitem'
 
     # Maximum length of the notes recorded against a stock tracking event
     TRACKING_NOTES_MAX_LENGTH = AUDIT_NOTES_MAX_LENGTH
@@ -525,6 +537,25 @@ class StockItem(
                 # "no serial" is not a value this constraint should govern
                 condition=Q(serial__isnull=False) & ~Q(serial=''),
                 name='stock_item_unique_part_serial',
+            ),
+            # The generic consumer reference is either fully set, or fully empty
+            models.CheckConstraint(
+                condition=(
+                    Q(consumed_by_model_type__isnull=True)
+                    & Q(consumed_by_model_id__isnull=True)
+                )
+                | (
+                    Q(consumed_by_model_type__isnull=False)
+                    & Q(consumed_by_model_id__isnull=False)
+                ),
+                name='stock_item_consumer_type_and_id',
+            ),
+        ]
+
+        indexes = [
+            models.Index(
+                fields=['consumed_by_model_type', 'consumed_by_model_id'],
+                name='stock_item_consumer_idx',
             )
         ]
 
@@ -680,6 +711,7 @@ class StockItem(
         belongs_to=None,
         customer=None,
         consumed_by=None,
+        consumed_by_model_type=None,
         is_building=False,
         status__in=StockStatusGroups.AVAILABLE_CODES,
     ) & (Q(location=None) | Q(location__exclude_from_stock=False))
@@ -1181,6 +1213,8 @@ class StockItem(
         if self.belongs_to and self.belongs_to.pk == self.pk:
             raise ValidationError({'belongs_to': _('Item cannot belong to itself')})
 
+        self.validate_consumer()
+
         # If the item is marked as "is_building", it must point to a build!
         if self.is_building and not self.build:
             raise ValidationError({
@@ -1352,6 +1386,62 @@ class StockItem(
         null=True,
         blank=True,
     )
+
+    # Generic reference to the object which has consumed this stock item.
+    # The consumer must implement StockConsumerMixin - see stock.consume.consume_stock()
+    consumed_by_model_type = models.ForeignKey(
+        ContentType,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='+',
+        verbose_name=_('Consumer Type'),
+        help_text=_('Type of the object which has consumed this stock item'),
+    )
+
+    consumed_by_model_id = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        verbose_name=_('Consumer ID'),
+        help_text=_('ID of the object which has consumed this stock item'),
+    )
+
+    # Note: Renamed to 'consumed_by' once the legacy 'consumed_by' field is removed
+    consumer = GenericForeignKey('consumed_by_model_type', 'consumed_by_model_id')
+
+    @property
+    def is_consumed(self) -> bool:
+        """Return True if this stock item has been consumed (generic relation)."""
+        return self.consumed_by_model_type_id is not None
+
+    def validate_consumer(self):
+        """Validate the generic consumer reference."""
+        if (self.consumed_by_model_type_id is None) != (
+            self.consumed_by_model_id is None
+        ):
+            raise ValidationError({
+                'consumed_by_model_type': _(
+                    'Consumer type and ID must be provided together'
+                )
+            })
+
+        if self.consumed_by_model_type_id is None:
+            return
+
+        # Use the ContentType cache, as this is called on every save()
+        model_class = ContentType.objects.get_for_id(
+            self.consumed_by_model_type_id
+        ).model_class()
+
+        if model_class is None or not issubclass(model_class, StockConsumerMixin):
+            raise ValidationError({
+                'consumed_by_model_type': _('Invalid consumer type')
+            })
+
+        if model_class is StockItem and self.consumed_by_model_id == self.pk:
+            raise ValidationError({
+                'consumed_by_model_id': _('Item cannot consume itself')
+            })
 
     expiry_date = models.DateField(
         blank=True,
@@ -2356,6 +2446,7 @@ class StockItem(
             self.belongs_to is None,  # Not installed inside another StockItem
             self.customer is None,  # Not assigned to a customer
             self.consumed_by is None,  # Not consumed by a build
+            self.consumed_by_model_type_id is None,  # Not consumed (generic)
         ])
 
     @property

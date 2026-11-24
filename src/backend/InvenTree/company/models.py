@@ -30,6 +30,7 @@ from common.currency import currency_code_default
 from common.settings import get_global_setting
 from generic.models.base import InvenTreeMetadataModel, InvenTreeModel
 from generic.models.modelmixins import (
+    ConsumedStockPolicy,
     InvenTreeAttachmentMixin,
     InvenTreeAuditMixin,
     InvenTreeBarcodeMixin,
@@ -37,6 +38,7 @@ from generic.models.modelmixins import (
     InvenTreeNoteMixin,
     InvenTreeParameterMixin,
     InvenTreeTagsMixin,
+    StockConsumerMixin,
 )
 from InvenTree.fields import InvenTreeURLField, RoundingDecimalField
 from order.status_codes import PurchaseOrderStatusGroups
@@ -101,6 +103,7 @@ class Company(
     InvenTreeParameterMixin,
     InvenTreeNoteMixin,
     InvenTreeTagsMixin,
+    StockConsumerMixin,
     report.mixins.InvenTreeReportMixin,
     InvenTreeImageMixin,
     InvenTreeMetadataModel,
@@ -136,6 +139,15 @@ class Company(
 
     IMAGE_RENAME = rename_company_image
     IMPORT_ID_FIELDS = ['name']
+
+    # Stock assigned to a customer (outside of a SalesOrder) is consumed by the company
+    CONSUMED_STOCK_ON_DELETE = ConsumedStockPolicy.PROTECT
+    STOCK_CONSUMED_EVENT = 'SENT_TO_CUSTOMER'
+    STOCK_CONSUMED_DELTA_KEY = 'customer'
+
+    def get_consuming_customer(self):
+        """Stock assigned to a company is received by that company."""
+        return self
 
     class Meta:
         """Metaclass defines extra model options."""

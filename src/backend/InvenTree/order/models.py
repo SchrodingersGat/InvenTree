@@ -52,6 +52,7 @@ from company.models import (
 )
 from generic.models.base import InvenTreeMetadataModel
 from generic.models.modelmixins import (
+    ConsumedStockPolicy,
     InvenTreeAttachmentMixin,
     InvenTreeAuditMixin,
     InvenTreeBarcodeMixin,
@@ -59,6 +60,7 @@ from generic.models.modelmixins import (
     InvenTreeParameterMixin,
     InvenTreeReferenceIndexingMixin,
     InvenTreeTagsMixin,
+    StockConsumerMixin,
 )
 from generic.states import (
     RETURN_VALUE,
@@ -1501,8 +1503,13 @@ SERIALIZED_STOCK_CHOICES = [
 SERIALIZED_STOCK_DEFAULT = 'any'
 
 
-class SalesOrder(AuditedOrderMixin, TotalPriceMixin, Order):
+class SalesOrder(StockConsumerMixin, AuditedOrderMixin, TotalPriceMixin, Order):
     """A SalesOrder represents a list of goods shipped outwards to a customer."""
+
+    # Stock shipped against a SalesOrder is consumed by the order
+    CONSUMED_STOCK_ON_DELETE = ConsumedStockPolicy.PROTECT
+    STOCK_CONSUMED_EVENT = 'SHIPPED_AGAINST_SALES_ORDER'
+    STOCK_CONSUMED_DELTA_KEY = 'salesorder'
 
     REFERENCE_PATTERN_SETTING = 'SALESORDER_REFERENCE_PATTERN'
     REQUIRE_RESPONSIBLE_SETTING = 'SALESORDER_REQUIRE_RESPONSIBLE'
@@ -1525,6 +1532,10 @@ class SalesOrder(AuditedOrderMixin, TotalPriceMixin, Order):
 
         return_ctx.update({'customer': self.customer})
         return return_ctx
+
+    def get_consuming_customer(self):
+        """Stock shipped against this order is received by the order customer."""
+        return self.customer
 
     def get_absolute_url(self) -> str:
         """Get the 'web' URL for this order."""

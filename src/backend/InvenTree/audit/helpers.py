@@ -74,6 +74,11 @@ def copy_related_cache(source, target) -> None:
         except FieldDoesNotExist:
             continue
 
+        # Only concrete foreign keys - a GenericForeignKey is many_to_one too,
+        # but reading its 'attname' would resolve (fetch) the related object
+        if not getattr(field, 'concrete', False):
+            continue
+
         attname = getattr(field, 'attname', None)
 
         if (

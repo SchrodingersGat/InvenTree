@@ -15,6 +15,7 @@ class StockEvents(BaseEventEnum):
     ITEM_COUNTED = 'stockitem.counted'
     ITEM_QUANTITY_UPDATED = 'stockitem.quantityupdated'
     ITEM_INSTALLED_INTO_ASSEMBLY = 'stockitem.installed'
+    ITEM_CONSUMED = 'stockitem.consumed'
     ITEM_DISASSEMBLED = 'stockitem.disassembled'
 
     ITEMS_CREATED = 'stockitem.created_items'
