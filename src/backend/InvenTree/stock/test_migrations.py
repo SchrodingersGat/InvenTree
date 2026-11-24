@@ -633,3 +633,231 @@ class TestStockTrackingAuditMigration(MigratorTestCase):
         ]:
             with self.subTest(check=check.__name__):
                 check()
+
+
+class TestConsumedByMigration(MigratorTestCase):
+    """Test the data migration which copies the legacy "consumed" fields (stock.0133).
+
+    One item per legacy state (see the precedence table in the migration),
+    plus conflict rows, and a reverse round trip.
+    """
+
+    migrate_from = ('stock', '0132_stockitem_consumed_by_generic')
+    migrate_to = ('stock', '0133_migrate_consumed_by')
+
+    def make_item(self, **kwargs) -> int:
+        """Insert a StockItem via raw SQL (avoids a duplicate status_custom_key ORM bug)."""
+        from django.db import connection
+
+        fields = {
+            'part_id': self.part.pk,
+            'quantity': 1,
+            'status': 10,
+            'delete_on_deplete': False,
+            'is_building': False,
+            'link': '',
+            'serial_int': 0,
+            'barcode_data': '',
+            'barcode_hash': '',
+            **{f'{key}_id': value for key, value in kwargs.items()},
+        }
+
+        columns = ', '.join(fields.keys())
+        values = ', '.join(['%s'] * len(fields))
+        insert_sql = f'INSERT INTO stock_stockitem ({columns}) VALUES ({values}) '
+        params = list(fields.values())
+
+        with connection.cursor() as cursor:
+            if connection.features.can_return_rows_from_bulk_insert:
+                cursor.execute(insert_sql + 'RETURNING id', params)
+                return cursor.fetchone()[0]
+
+            cursor.execute(insert_sql, params)
+            return cursor.lastrowid
+
+    def prepare(self):
+        """Create stock items in each legacy consumed state."""
+        apps = self.old_state.apps
+
+        Part = apps.get_model('part', 'part')
+        Company = apps.get_model('company', 'company')
+        SalesOrder = apps.get_model('order', 'salesorder')
+        Build = apps.get_model('build', 'build')
+
+        tree = {'level': 0, 'tree_id': 0, 'lft': 0, 'rght': 0}
+
+        self.part = Part.objects.create(name='Consumable', **tree)
+
+        self.customer = Company.objects.create(name='Customer A', is_customer=True)
+        self.other_customer = Company.objects.create(
+            name='Customer B', is_customer=True
+        )
+        self.order = SalesOrder.objects.create(
+            reference='SO-0133', customer=self.customer, reference_int=133
+        )
+        self.build = Build.objects.create(
+            part=self.part, reference='BO-0133', title='Build', quantity=1, **tree
+        )
+
+        self.output = self.make_item(build=self.build.pk)
+
+        self.items = {
+            'available': self.make_item(),
+            'build_install': self.make_item(
+                belongs_to=self.output, consumed_by=self.build.pk
+            ),
+            'manual_install': self.make_item(belongs_to=self.output),
+            'shipped': self.make_item(
+                sales_order=self.order.pk, customer=self.customer.pk
+            ),
+            'shipped_mismatch': self.make_item(
+                sales_order=self.order.pk, customer=self.other_customer.pk
+            ),
+            'order_only': self.make_item(sales_order=self.order.pk),
+            'build_only': self.make_item(consumed_by=self.build.pk),
+            'customer_only': self.make_item(customer=self.customer.pk),
+            'conflict': self.make_item(
+                consumed_by=self.build.pk, customer=self.customer.pk
+            ),
+        }
+
+        self.legacy = self.legacy_state(apps)
+
+    def migrate_back(self):
+        """Reverse the migration (keeping data), and return the historical apps."""
+        from django.db import connection
+        from django.db.migrations.executor import MigrationExecutor
+
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_from])
+
+        return executor.loader.project_state([self.migrate_from]).apps
+
+    def legacy_state(self, apps) -> dict:
+        """Return the legacy consumer fields for each item."""
+        StockItem = apps.get_model('stock', 'stockitem')
+
+        return {
+            key: StockItem.objects
+            .filter(pk=pk)
+            .values('belongs_to', 'sales_order', 'consumed_by', 'customer')
+            .get()
+            for key, pk in self.items.items()
+        }
+
+    def consumer(self, apps, key):
+        """Return the generic consumer of an item, as (model, pk)."""
+        StockItem = apps.get_model('stock', 'stockitem')
+        item = StockItem.objects.get(pk=self.items[key])
+
+        if item.consumed_by_model_type is None:
+            self.assertIsNone(item.consumed_by_model_id)
+            return None
+
+        return (item.consumed_by_model_type.model, item.consumed_by_model_id)
+
+    def test_forward(self):
+        """Each legacy state maps to the expected generic consumer."""
+        apps = self.new_state.apps
+
+        expected = {
+            'available': None,
+            'build_install': ('stockitem', self.output),
+            'manual_install': ('stockitem', self.output),
+            'shipped': ('salesorder', self.order.pk),
+            'shipped_mismatch': ('salesorder', self.order.pk),
+            'order_only': ('salesorder', self.order.pk),
+            'build_only': ('build', self.build.pk),
+            'customer_only': ('company', self.customer.pk),
+            'conflict': ('build', self.build.pk),
+        }
+
+        for key, consumer in expected.items():
+            self.assertEqual(self.consumer(apps, key), consumer, key)
+
+        # The build output itself is not consumed
+        StockItem = apps.get_model('stock', 'stockitem')
+        self.assertIsNone(StockItem.objects.get(pk=self.output).consumed_by_model_type)
+
+        # Legacy fields are left untouched (dropped later, in 0134)
+        self.assertEqual(self.legacy_state(apps), self.legacy)
+
+    def test_preflight(self):
+        """The pre-flight report counts the items which lose information."""
+        import importlib
+
+        migration = importlib.import_module('stock.migrations.0133_migrate_consumed_by')
+
+        # build_install, shipped, shipped_mismatch, conflict
+        self.assertEqual(
+            migration.preflight_report(self.new_state.apps),
+            {'multiple': 4, 'customer_mismatch': 1},
+        )
+
+    def test_reverse(self):
+        """The reverse migration restores the original state."""
+        apps = self.migrate_back()
+
+        StockItem = apps.get_model('stock', 'stockitem')
+        self.assertFalse(
+            StockItem.objects.filter(consumed_by_model_type__isnull=False).exists()
+        )
+        self.assertEqual(self.legacy_state(apps), self.legacy)
+
+    def test_reverse_reconstruct(self):
+        """Items with no legacy fields (consumed after 0134) are reconstructed."""
+        apps = self.new_state.apps
+
+        StockItem = apps.get_model('stock', 'stockitem')
+        ContentType = apps.get_model('contenttypes', 'contenttype')
+
+        def ct(app_label, model):
+            return ContentType.objects.get(app_label=app_label, model=model)
+
+        # Simulate items consumed via the generic reference only
+        new_items = {
+            'installed': (ct('stock', 'stockitem'), self.output),
+            'shipped': (ct('order', 'salesorder'), self.order.pk),
+            'built': (ct('build', 'build'), self.build.pk),
+            'assigned': (ct('company', 'company'), self.customer.pk),
+            'dangling': (ct('company', 'company'), 99999),
+        }
+
+        pks = {}
+
+        for key, (content_type, pk) in new_items.items():
+            pks[key] = self.make_item()
+            StockItem.objects.filter(pk=pks[key]).update(
+                consumed_by_model_type=content_type, consumed_by_model_id=pk
+            )
+
+        apps = self.migrate_back()
+        StockItem = apps.get_model('stock', 'stockitem')
+
+        def legacy(key):
+            return (
+                StockItem.objects
+                .filter(pk=pks[key])
+                .values('belongs_to', 'sales_order', 'consumed_by', 'customer')
+                .get()
+            )
+
+        empty = dict.fromkeys(['belongs_to', 'sales_order', 'consumed_by', 'customer'])
+
+        # Installed into a build output: the build is restored from the parent
+        self.assertEqual(
+            legacy('installed'),
+            {**empty, 'belongs_to': self.output, 'consumed_by': self.build.pk},
+        )
+        self.assertEqual(
+            legacy('shipped'),
+            {**empty, 'sales_order': self.order.pk, 'customer': self.customer.pk},
+        )
+        self.assertEqual(legacy('built'), {**empty, 'consumed_by': self.build.pk})
+        self.assertEqual(legacy('assigned'), {**empty, 'customer': self.customer.pk})
+
+        # A reference to a deleted consumer cannot be restored
+        self.assertEqual(legacy('dangling'), empty)
+
+        # The original items are unaffected
+        self.assertEqual(self.legacy_state(apps), self.legacy)
