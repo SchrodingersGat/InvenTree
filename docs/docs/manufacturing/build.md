@@ -122,8 +122,10 @@ The *Allocated Stock* tab displays all stock items which have been *allocated* t
 
 The *Consumed Stock* tab displays all stock items which have been *consumed* by this build order. These stock items remain in the database after the build order has been completed, but are no longer available for use.
 
-- [Tracked stock items](./allocate.md#tracked-stock) are consumed by specific build outputs
 - [Untracked stock items](./allocate.md#untracked-stock) are consumed by the build order
+- [Tracked stock items](./allocate.md#tracked-stock) are installed into (consumed by) specific build outputs - these are also listed here
+
+Refer to the [stock consumption](../stock/consumption.md) documentation for further information.
 
 !!! info "No BOM"
 	If the part being built does not have a BOM, then the *Consumed Stock* tab will not be displayed.

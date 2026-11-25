@@ -16,3 +16,7 @@ To access the customer page, click on the <span class="badge inventree nav main"
 ### Add Customer
 
 Once the customer page is loaded, click on the <span class="badge inventree add">{{ icon("plus-circle") }} New Customer</span> button: the "Create new Customer" form opens. Fill-in the manufacturer information (`Company name` and `Company description` are required) then click on <span class="badge inventree confirm">Submit</span>
+
+### Assigned Stock
+
+The *Assigned Stock* tab of a customer displays the stock items which have been sent to that customer - either shipped against one of the customer's sales orders, or assigned directly to the customer. Refer to the [stock consumption](../stock/consumption.md) documentation for further information.

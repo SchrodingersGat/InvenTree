@@ -45,7 +45,7 @@ The following parameters are available for each Transfer Order, and can be edite
 | Project Code | Project Code of the Transfer Order |
 | Source Location | Stock location to source stock items from (blank = all locations) |
 | Destination Location | Stock location where the stock will be transferred |
-| Consume Stock | Rather than transfer the stock to the destination, "consume" it by removing the specified quantity from the allocated stock item
+| Consume Stock | Rather than transfer the stock to the destination, "consume" it by removing the specified quantity from the allocated stock item. Note that this *depletes* the stock quantity - it is not [consumed](./consumption.md) by another object |
 | Start Date | The scheduled start date for the transfer |
 | Target Date | Target date for transfer completion |
 | External Link | Link to external webpage |

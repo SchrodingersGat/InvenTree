@@ -186,6 +186,8 @@ To complete a shipment, click on the <span class="badge inventree nav side">{{ i
 
 Fill out the "Complete Shipment" form then click on <span class="badge inventree confirm">Submit</span>.
 
+When a shipment is completed, the allocated stock items are [consumed](../stock/consumption.md) by the sales order: they are removed from stock, and are linked to the sales order (and so to its customer). If only part of a stock item was allocated, the shipped quantity is split off into a new stock item, and the remainder stays in stock.
+
 To view all the completed shipment, click on the <span class="badge inventree nav side">{{ icon("truck-delivery") }} Completed Shipments</span> tab. In the completed shipments table, click on each shipment to view the shipment details.
 
 ## Complete Order

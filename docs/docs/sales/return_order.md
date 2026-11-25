@@ -143,7 +143,7 @@ Receiving a line item performs the following actions on the underlying stock ite
 
 * Transfers the stock item to the selected destination location
 * Sets the stock item status (defaulting to *Quarantined*)
-* Removes the *Customer* reference from the stock item
+* Releases the stock item from its [consumer](../stock/consumption.md) (e.g. the sales order it was shipped against, or the customer it was assigned to)
 * Clears any outstanding sales order allocations against the stock item
 * Records a [stock tracking](../stock/tracking.md) event for the return
 

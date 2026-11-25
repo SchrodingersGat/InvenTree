@@ -49,10 +49,8 @@ The conditions for merging stock items are the following:
 
 Moreover, if one of the item:
 
-- is assigned to a sale order
-- or is installed in another item
+- has been [consumed](./consumption.md) (e.g. shipped against a sales order, assigned to a customer, installed in another item, or consumed by a build order)
 - or contains other items
-- or is assigned to a customer
 - or is currently in production
 - or is serialized
 

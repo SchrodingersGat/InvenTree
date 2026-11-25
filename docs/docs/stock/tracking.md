@@ -59,7 +59,7 @@ The history of all stock items for a particular part is displayed in the *Histor
 
 A stock item can be *installed* inside another stock item, forming a parent/child relationship between the two. This is used to represent physical assembly - for example, a serialized PCB assembly which has been fitted with a tracked sub-component, such as a wireless module or a pre-programmed IC.
 
-An installed stock item is no longer available for regular stock actions (it cannot be moved, allocated to an order, or built into another assembly) while it remains installed - it is only accessible "through" its parent item.
+An installed stock item is [consumed](./consumption.md) by its parent item, and is no longer available for regular stock actions (it cannot be moved, allocated to an order, or built into another assembly) while it remains installed - it is only accessible "through" its parent item.
 
 ### How Items Become Installed
 
@@ -72,7 +72,7 @@ There are two ways that a stock item can become installed inside another:
 
 Any stock items installed within a particular stock item are displayed on the *Installed Items* tab of the *Stock Item Detail* page.
 
-By default, installed stock items are hidden from general stock item tables (as they are not directly available for use) - this can be changed using the {{ globalsetting("STOCK_SHOW_INSTALLED_ITEMS", short=True) }} setting.
+Installed stock items are not *in stock*, so they are hidden from stock item tables which only display in-stock items (the default). To display installed items in a stock table, remove the *In Stock* filter, or filter by *Consumer Type* (*Installed in Stock Item*).
 
 ### Removing Installed Items
 

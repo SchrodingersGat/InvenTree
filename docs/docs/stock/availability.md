@@ -34,9 +34,12 @@ For example, if a stock item has an *In Stock* quantity of 100, and 30 units hav
 
 ## Consumed or Depleted Stock
 
-Once allocated stock quantities are consumed (e.g. when fulfilling an order or completing a build), the *In Stock* quantity of the stock item is reduced accordingly. This means that the *Available* quantity is also reduced.
+Stock leaves inventory in one of two ways:
 
-Consumed stock is no longer available - refer to [Stock Consumption](./consumption.md) for further information.
+- **Consumed** - the stock is used by another object, for example when a build order is completed, a sales order shipment is completed, a stock item is installed into another item, or stock is assigned to a customer. The consumed quantity is split off into a separate stock item, which is retained (for traceability) but is no longer *In Stock*. Refer to [Stock Consumption](./consumption.md) for further information.
+- **Depleted** - the stock quantity is reduced (e.g. by removing stock), without recording what it was used for.
+
+In either case, the *In Stock* (and *Available*) quantity for the part is reduced accordingly.
 
 ### Delete on Deplete
 
