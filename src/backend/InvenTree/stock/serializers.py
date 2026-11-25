@@ -2228,13 +2228,28 @@ class StockRemoveSerializer(StockAdjustmentSerializer):
             write_batched(),
             batch_offload_tasks(),
         ):
-            for item in data['items']:
+            # Ignore items with no stock to remove
+            items = [
+                item
+                for item in data['items']
+                if item['quantity'] is not None and item['quantity'] > 0
+            ]
+
+            # Lock each row first (items are already sorted by pk - deadlock avoidance),
+            # so that the allocation check below sees the current committed quantity
+            items = [item for item in items if item['pk'].lock_quantity()]
+
+            # Fetch allocated quantities for all items at once (3 queries in total),
+            # rather than calling allocation_count() for each item (3 queries per item)
+            allocated = StockItem.bulk_allocation_count([item['pk'] for item in items])
+
+            for item in items:
                 stock_item = item['pk']
                 quantity = item['quantity']
 
-                # Ignore in this case - no stock to remove
-                if quantity is None or quantity <= 0:
-                    continue
+                validate_allocation_boundary(
+                    quantity, stock_item.quantity, allocated.get(stock_item.pk, 0)
+                )
 
                 # Optional fields
                 extra = {}
