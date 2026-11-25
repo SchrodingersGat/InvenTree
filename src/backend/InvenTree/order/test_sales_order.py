@@ -539,7 +539,7 @@ class SalesOrderTest(InvenTreeAPITestCase):
         It also checks that:
         - Stock items are split (or fully consumed) correctly
         - The correct stock tracking entries are created for each item
-        - The associated ITEM_SPLIT / ITEM_ASSIGNED_TO_CUSTOMER events are queued
+        - The associated ITEM_SPLIT / ITEM_CONSUMED events are queued
         - A low-stock check is queued for the (single) affected part
         - Line 'shipped' quantities and allocation->item references are updated correctly
 
@@ -661,12 +661,13 @@ class SalesOrderTest(InvenTreeAPITestCase):
         ]
         self.assertEqual(len(split_event_tasks), len(split_pks))
 
-        # register_event tasks queued for StockEvents.ITEM_ASSIGNED_TO_CUSTOMER, one per item
+        # register_event tasks queued for StockEvents.ITEM_CONSUMED, one per item
         customer_event_tasks = [
             task
             for task in queued_tasks
             if task.func() == 'plugin.base.event.events.register_event'
-            and task.args() == (StockEvents.ITEM_ASSIGNED_TO_CUSTOMER,)
+            and task.args() == (StockEvents.ITEM_CONSUMED,)
+            and task.kwargs().get('consumer_model_type') == 'salesorder'
         ]
         self.assertEqual(len(customer_event_tasks), N_ITEMS)
 

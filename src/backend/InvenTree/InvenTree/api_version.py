@@ -6,10 +6,15 @@ INVENTREE_API_VERSION = 585
 
 INVENTREE_API_TEXT = """
 
-v585 -> 2026-11-24 : https://github.com/inventree/InvenTree/pull/XXXXX
-    - Stock consumption is recorded via a single generic reference (consumed_by_model_type / consumed_by_model_id)
-    - The "belongs_to", "consumed_by", "sales_order" and "customer" fields on the StockItem API are now read-only (derived from the consumer)
-    - The "belongs_to", "consumed_by", "sales_order" and "customer" StockItem filters now match the consumer of the stock item
+v585 -> 2026-11-25 : https://github.com/inventree/InvenTree/pull/XXXXX
+    - Breaking: Stock consumption is recorded via a single generic reference to the consuming object
+    - StockItem API: removes the "belongs_to", "consumed_by", "sales_order" and "sales_order_reference" fields
+    - StockItem API: adds the read-only "consumed_by_model_type" (e.g. "build", "salesorder", "stockitem", "company") and "consumed_by_model_id" fields
+    - StockItem API: "consumed_by_detail" now describes any consumer (model_type, pk, name, url, deleted), and is null if the user cannot view the consumer
+    - StockItem API: "customer" is now read-only (derived from the consumer), and adds the optional "customer_detail" field
+    - StockItem filters: removes "belongs_to", "consumed_by", "sales_order", "installed" and "sent_to_customer"
+    - StockItem filters: adds "consumed_by_model_type", "consumed_by_model_id", "build_consumed" and "installed_in"; "consumed" now matches any consumer
+    - Plugin events: removes "stockitem.installed" and "stockitem.assignedtocustomer" (use "stockitem.consumed")
 
 v584 -> 2026-11-23 : https://github.com/inventree/InvenTree/pull/13346
     - Adds "search_fields" query parameter to list endpoints, to limit a search to a subset of the searchable fields

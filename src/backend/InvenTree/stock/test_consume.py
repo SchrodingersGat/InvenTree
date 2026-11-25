@@ -314,7 +314,7 @@ class ConsumeStockTest(ConsumptionTestBase):
                     {
                         'id': result.item.pk,
                         'quantity': float(result.quantity),
-                        'consumer_model_type': 'order.salesorder',
+                        'consumer_model_type': 'salesorder',
                         'consumer_id': self.order.pk,
                     },
                 )

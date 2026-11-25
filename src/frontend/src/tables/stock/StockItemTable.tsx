@@ -8,12 +8,11 @@ import { ApiEndpoints } from '@lib/enums/ApiEndpoints';
 import { ModelType } from '@lib/enums/ModelType';
 import { UserRoles } from '@lib/enums/Roles';
 import { apiUrl } from '@lib/functions/Api';
-import { getDetailUrl } from '@lib/functions/Navigation';
 import useTable from '@lib/hooks/UseTable';
 import type { TableFilter } from '@lib/types/Filters';
 import type { StockOperationProps } from '@lib/types/Forms';
 import type { TableColumn } from '@lib/types/Tables';
-import { RenderInlineModel } from '../../components/render/Instance';
+import { RenderConsumer } from '../../components/render/Consumer';
 import {
   DateColumn,
   DescriptionColumn,
@@ -90,25 +89,19 @@ function stockItemTableColumns({
         'available',
         'allocated',
         'consumed',
-        'installed',
-        'in_stock',
-        'sent_to_customer'
+        'consumed_by_model_type',
+        'in_stock'
       ]
     }),
     StatusColumn({ model: ModelType.stockitem }),
     {
-      accessor: 'consumed_by_detail.reference',
+      accessor: 'consumed_by_detail.name',
       title: t`Consumed By`,
       sortable: false,
       hidden: !showConsumedBy,
-      render: (record: any) =>
-        record.consumed_by_detail ? (
-          <RenderInlineModel
-            primary={record.consumed_by_detail.reference}
-            url={getDetailUrl(ModelType.build, record.consumed_by_detail.pk)}
-            navigate={navigate}
-          />
-        ) : null
+      render: (record: any) => (
+        <RenderConsumer record={record} navigate={navigate} />
+      )
     },
     {
       accessor: 'batch',
@@ -261,17 +254,19 @@ function stockItemTableFilters({
     {
       name: 'consumed',
       label: t`Consumed`,
-      description: t`Show items which have been consumed by a build order`
+      description: t`Show items which have been consumed (by any consumer)`
     },
     {
-      name: 'installed',
-      label: t`Installed`,
-      description: t`Show stock items which are installed in other items`
-    },
-    {
-      name: 'sent_to_customer',
-      label: t`Sent to Customer`,
-      description: t`Show items which have been sent to a customer`
+      name: 'consumed_by_model_type',
+      label: t`Consumer Type`,
+      description: t`Show items which have been consumed by a particular type of object`,
+      type: 'choice',
+      choices: [
+        { value: ModelType.build, label: t`Build Order` },
+        { value: ModelType.salesorder, label: t`Sales Order` },
+        { value: ModelType.stockitem, label: t`Installed in Stock Item` },
+        { value: ModelType.company, label: t`Customer` }
+      ]
     },
     HasBatchCodeFilter(),
     BatchFilter(),

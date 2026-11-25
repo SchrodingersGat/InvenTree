@@ -97,6 +97,7 @@ export default function StockDetail() {
       part_detail: true,
       location_detail: true,
       path_detail: true,
+      consumed_by_detail: true,
       tags: true
     }
   });
@@ -112,9 +113,8 @@ export default function StockDetail() {
     // Determine if "build allocations" should be shown for this stock item
     return (
       stockitem?.part_detail?.component && // Must be a "component"
-      !stockitem?.sales_order && // Must not be assigned to a sales order
-      !stockitem?.belongs_to
-    ); // Must not be installed into another item
+      !stockitem?.consumed_by_model_type
+    ); // Must not be consumed (e.g. shipped, or installed into another item)
   }, [stockitem]);
 
   const showSalesAllocations: boolean = useMemo(() => {
@@ -444,7 +444,7 @@ export default function StockDetail() {
     add: !stockitem.serial,
     remove: !stockitem.serial,
     assign: !!stockitem.in_stock && stockitem.part_detail?.salable,
-    return: !!stockitem.consumed_by || !!stockitem.customer,
+    return: !!stockitem.consumed_by_model_type,
     merge: false
   });
 

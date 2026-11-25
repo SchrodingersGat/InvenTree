@@ -91,8 +91,7 @@ from order.status_codes import (
 )
 from part import models as PartModels
 from plugin.base.integration.AllocateMixin import apply_allocate_mixin
-from plugin.events import bulk_trigger_event, trigger_event
-from stock.events import StockEvents
+from plugin.events import trigger_event
 from stock.status_codes import StockHistoryCode, StockStatus
 
 logger = structlog.get_logger('inventree')
@@ -3070,21 +3069,6 @@ class SalesOrderShipment(
         # Repoint allocations onto their (possibly newly split) StockItem
         if allocations_to_update:
             SalesOrderAllocation.objects.bulk_update(allocations_to_update, ['item'])
-
-        # Queue the (legacy) ITEM_ASSIGNED_TO_CUSTOMER plugin events in bulk
-        bulk_trigger_event(
-            StockEvents.ITEM_ASSIGNED_TO_CUSTOMER,
-            [
-                (
-                    (),
-                    {
-                        'id': result.item.pk,
-                        'customer': customer.pk if customer else None,
-                    },
-                )
-                for result in results
-            ],
-        )
 
     @transaction.atomic
     def complete_shipment(self, user, **kwargs):

@@ -27,6 +27,10 @@ import {
 } from '../../components/details/Details';
 import { DetailsImage } from '../../components/details/DetailsImage';
 import { ItemDetailsGrid } from '../../components/details/ItemDetails';
+import {
+  RenderConsumer,
+  consumerLabel
+} from '../../components/render/Consumer';
 import { formatCurrency } from '../../defaults/formatters';
 import { useFindSerialNumberForm } from '../../forms/StockForms';
 import { useInstance } from '../../hooks/UseInstance';
@@ -245,7 +249,7 @@ export function StockDetailsPanel({
     },
     {
       type: 'link',
-      name: 'belongs_to',
+      name: 'consumed_by_model_id',
       label: t`Installed In`,
       model_filters: {
         part_detail: true
@@ -259,7 +263,23 @@ export function StockDetailsPanel({
       },
       icon: 'stock',
       model: ModelType.stockitem,
-      hidden: !instance?.belongs_to
+      // Installed into another stock item (which has not been deleted)
+      hidden:
+        instance?.consumed_by_model_type != ModelType.stockitem ||
+        !!instance?.consumed_by_detail?.deleted
+    },
+    {
+      type: 'text',
+      name: 'consumed_by_model_id',
+      label: consumerLabel(instance?.consumed_by_model_type),
+      icon: 'stock',
+      hidden:
+        !instance?.consumed_by_model_type ||
+        (instance?.consumed_by_model_type == ModelType.stockitem &&
+          !instance?.consumed_by_detail?.deleted),
+      value_formatter: () => (
+        <RenderConsumer record={instance} navigate={navigate} />
+      )
     },
     {
       type: 'link',
@@ -269,15 +289,6 @@ export function StockDetailsPanel({
       model: ModelType.stockitem,
       hidden: !instance?.parent,
       model_formatter: () => t`Parent stock item`
-    },
-    {
-      type: 'link',
-      name: 'consumed_by',
-      label: t`Consumed By`,
-      model: ModelType.build,
-      hidden: !instance?.consumed_by,
-      icon: 'build',
-      model_field: 'reference'
     },
     {
       type: 'link',
@@ -298,19 +309,13 @@ export function StockDetailsPanel({
     },
     {
       type: 'link',
-      name: 'sales_order',
-      label: t`Sales Order`,
-      model: ModelType.salesorder,
-      hidden: !instance?.sales_order,
-      icon: 'sales_orders',
-      model_field: 'reference'
-    },
-    {
-      type: 'link',
       name: 'customer',
       label: t`Customer`,
       model: ModelType.company,
-      hidden: !instance?.customer
+      // A customer consumer is already shown above
+      hidden:
+        !instance?.customer ||
+        instance?.consumed_by_model_type == ModelType.company
     }
   ];
 

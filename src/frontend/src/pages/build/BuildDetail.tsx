@@ -282,7 +282,7 @@ export default function BuildDetail() {
             allowReturn
             defaultInStock={null}
             params={{
-              consumed_by: id
+              build_consumed: id
             }}
           />
         )

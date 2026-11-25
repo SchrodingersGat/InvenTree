@@ -3,6 +3,7 @@
 from datetime import timedelta
 from decimal import Decimal
 
+from django.contrib.contenttypes.prefetch import GenericPrefetch
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.db.models import BooleanField, Case, Count, Prefetch, Q, Value, When
@@ -29,7 +30,6 @@ import part.serializers as part_serializers
 import stock.filters
 import stock.status_codes
 from audit.helpers import audit_event, write_batched
-from build.serializers_brief import BuildBriefSerializer
 from common.settings import get_global_setting
 from generic.states.fields import InvenTreeCustomStatusSerializerMixin
 from importer.registry import register_importer
@@ -308,6 +308,118 @@ class StockItemTestResultSerializer(
         return data
 
 
+class ConsumedByDetailSerializer(serializers.Serializer):
+    """Brief detail of the (generic) consumer of a StockItem.
+
+    The consumer may be any model which implements StockConsumerMixin
+    (e.g. a Build, SalesOrder, Company or another StockItem).
+
+    - If the consumer has been deleted, only the model type and primary key are provided
+    - If the requesting user cannot view the consumer model, None is returned
+    """
+
+    class Meta:
+        """Metaclass options."""
+
+        fields = ['model_type', 'pk', 'name', 'url', 'deleted']
+
+    model_type = serializers.ChoiceField(
+        choices=[], read_only=True, label=_('Model Type')
+    )
+    pk = serializers.IntegerField(read_only=True, label=_('ID'))
+    name = serializers.CharField(read_only=True, allow_null=True, label=_('Name'))
+    url = serializers.CharField(read_only=True, allow_null=True, label=_('URL'))
+    deleted = serializers.BooleanField(
+        read_only=True, label=_('Deleted'), help_text=_('The consumer has been deleted')
+    )
+
+    @staticmethod
+    def consumer_type_choices() -> list:
+        """Return the available consumer model types."""
+        from generic.models.modelmixins import StockConsumerMixin
+        from InvenTree.helpers_model import getModelsWithMixin
+
+        return [
+            (model._meta.model_name, model._meta.verbose_name)
+            for model in getModelsWithMixin(StockConsumerMixin)
+        ]
+
+    def __init__(self, *args, **kwargs):
+        """Initialize the serializer, providing the consumer type choices."""
+        super().__init__(*args, **kwargs)
+        self.fields['model_type'].choices = self.consumer_type_choices()
+
+    def get_permission_user(self):
+        """Return the user against which the consumer view permission is checked."""
+        if request := self.context.get('request'):
+            return getattr(request, 'user', None)
+
+        parent = self.parent
+
+        while parent is not None:
+            if getter := getattr(parent, 'get_permission_user', None):
+                return getter()
+
+            parent = parent.parent
+
+        return None
+
+    @staticmethod
+    def consumer_name(consumer) -> str:
+        """Return a concise name for the consumer (e.g. an order reference, or a company name)."""
+        for attr in ['reference', 'name']:
+            if value := getattr(consumer, attr, None):
+                return str(value)
+
+        return str(consumer)
+
+    def to_representation(self, instance):
+        """Render the consumer of the provided StockItem."""
+        if not isinstance(instance, StockItem):
+            # e.g. rendering the validated data of a write request
+            return None
+
+        model = instance.consumer_model
+
+        if model is None:
+            return None
+
+        user = self.get_permission_user()
+
+        if user is not None:
+            from users.permissions import check_user_permission
+
+            cache = self.__dict__.setdefault('_permission_cache', {})
+
+            if model not in cache:
+                cache[model] = check_user_permission(user, model, 'view')
+
+            if not cache[model]:
+                return None
+
+        consumer = instance.consumed_by
+
+        if consumer is None:
+            # The consumer has been deleted
+            return {
+                'model_type': model._meta.model_name,
+                'pk': instance.consumed_by_model_id,
+                'name': None,
+                'url': None,
+                'deleted': True,
+            }
+
+        return {
+            'model_type': model._meta.model_name,
+            'pk': consumer.pk,
+            'name': self.consumer_name(consumer),
+            'url': consumer.get_absolute_url()
+            if hasattr(consumer, 'get_absolute_url')
+            else None,
+            'deleted': False,
+        }
+
+
 @register_importer()
 class StockItemSerializer(
     CustomStatusSerializerMixin,
@@ -328,7 +440,8 @@ class StockItemSerializer(
     SKIP_CREATE_FIELDS = ['duplicate']
 
     export_child_fields = [
-        'consumed_by_detail.reference',
+        'consumed_by_detail.name',
+        'customer_detail.name',
         'part_detail.name',
         'part_detail.description',
         'part_detail.IPN',
@@ -354,11 +467,12 @@ class StockItemSerializer(
             'serial',
             'batch',
             'location',
-            'belongs_to',
             'build',
-            'consumed_by',
+            'consumed_by_model_type',
+            'consumed_by_model_id',
             'consumed_by_detail',
             'customer',
+            'customer_detail',
             'delete_on_deplete',
             'expiry_date',
             'in_stock',
@@ -369,8 +483,6 @@ class StockItemSerializer(
             'parent',
             'purchase_order',
             'purchase_order_reference',
-            'sales_order',
-            'sales_order_reference',
             'status',
             'status_text',
             'status_custom_key',
@@ -404,6 +516,7 @@ class StockItemSerializer(
             'allocated',
             'barcode_hash',
             'build',
+            'consumed_by_model_id',
             'creation_date',
             'is_building',
             'stocktake_date',
@@ -543,8 +656,9 @@ class StockItemSerializer(
             'part__category',
             'supplier_part',
             'supplier_part__manufacturer_part',
-            # The (generic) consumer of each stock item
-            'consumed_by',
+            # The (generic) consumer of each stock item, with the related data
+            # required to render it (and to derive the customer)
+            StockItemSerializer.consumer_prefetch(),
         )
 
         # Annotate the queryset with the total allocated quantity
@@ -714,30 +828,25 @@ class StockItemSerializer(
     )
 
     # Read-only fields which describe the (generic) consumer of this stock item
-    # Note: These are derived from the consumed_by_model_type / consumed_by_model_id fields
 
-    belongs_to = serializers.IntegerField(
-        source='belongs_to.pk',
+    consumed_by_model_type = serializers.ChoiceField(
+        source='consumed_by_model_name',
+        choices=[],
         read_only=True,
         allow_null=True,
-        label=_('Installed In'),
-        help_text=_('Stock item which this item is installed in'),
+        label=_('Consumer Type'),
+        help_text=_('Type of the object which has consumed this stock item'),
     )
 
-    consumed_by = serializers.IntegerField(
-        source='consumed_by_build.pk',
-        read_only=True,
-        allow_null=True,
-        label=_('Consumed By'),
-        help_text=_('Build order which consumed this stock item'),
-    )
-
-    sales_order = serializers.IntegerField(
-        source='sales_order.pk',
-        read_only=True,
-        allow_null=True,
-        label=_('Sales Order'),
-        help_text=_('Sales order which this stock item was shipped against'),
+    consumed_by_detail = OptionalField(
+        serializer_class=ConsumedByDetailSerializer,
+        serializer_kwargs={
+            'label': _('Consumed By'),
+            'source': '*',
+            'read_only': True,
+            'allow_null': True,
+        },
+        default_include=False,
     )
 
     customer = serializers.IntegerField(
@@ -748,24 +857,39 @@ class StockItemSerializer(
         help_text=_('Customer which this stock item was sent to'),
     )
 
-    consumed_by_detail = OptionalField(
-        serializer_class=BuildBriefSerializer,
+    customer_detail = OptionalField(
+        serializer_class=company_serializers.CompanyBriefSerializer,
         serializer_kwargs={
-            'label': _('Consumed By'),
-            'source': 'consumed_by_build',
+            'label': _('Customer'),
+            'source': 'customer',
             'read_only': True,
             'allow_null': True,
         },
         default_include=False,
-        prefetch_fields=['consumed_by'],
     )
+
+    @staticmethod
+    def consumer_prefetch():
+        """Prefetch the (generic) consumer of each stock item, with the data required to render it."""
+        return GenericPrefetch(
+            'consumed_by',
+            [
+                build.models.Build.objects.all(),
+                order.models.SalesOrder.objects.select_related('customer'),
+                company.models.Company.objects.all(),
+                StockItem.objects.select_related('part', 'location'),
+            ],
+        )
+
+    def __init__(self, *args, **kwargs):
+        """Initialize the serializer, providing the consumer type choices."""
+        super().__init__(*args, **kwargs)
+
+        if field := self.fields.get('consumed_by_model_type'):
+            field.choices = ConsumedByDetailSerializer.consumer_type_choices()
 
     purchase_order_reference = serializers.CharField(
         source='purchase_order.reference', read_only=True, allow_null=True
-    )
-
-    sales_order_reference = serializers.CharField(
-        source='sales_order.reference', read_only=True, allow_null=True
     )
 
     tags = common.filters.enable_tags_filter()

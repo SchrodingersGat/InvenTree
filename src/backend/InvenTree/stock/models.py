@@ -1374,6 +1374,12 @@ class StockItem(
             self.consumed_by_model_type_id
         ).model_class()
 
+    @property
+    def consumed_by_model_name(self) -> Optional[str]:
+        """Return the model name of the consumer of this stock item (e.g. 'build'), or None."""
+        model = self.consumer_model
+        return model._meta.model_name if model else None
+
     def _get_consumer_of_type(self, model):
         """Return the consumer of this stock item, if it is an instance of the provided model."""
         if self.consumer_model is not model:
@@ -1740,16 +1746,8 @@ class StockItem(
         if not results:
             raise ValidationError(_('Stock item no longer exists'))
 
-        item = results[0].item
-
-        trigger_event(
-            StockEvents.ITEM_ASSIGNED_TO_CUSTOMER,
-            id=item.pk,
-            customer=customer.pk if customer else None,
-        )
-
-        # Return the reference to the stock item
-        return item
+        # Return the reference to the (possibly newly split) stock item
+        return results[0].item
 
     @transaction.atomic
     def return_from_customer(self, location, user=None, **kwargs):
@@ -2053,22 +2051,19 @@ class StockItem(
         if quantity <= 0:
             raise ValidationError({'quantity': _('Quantity must be greater than zero')})
 
+        # If this item is a build output, the build order is recorded in the audit log
+        deltas = {'buildorder': self.build} if self.build_id else {}
+
         results = consume_stock(
-            [ConsumeRequest(other_item, quantity, self)], user=user, notes=notes or ''
+            [ConsumeRequest(other_item, quantity, self, deltas=deltas)],
+            user=user,
+            notes=notes or '',
         )
 
         if not results:
             raise ValidationError(_('Stock item no longer exists'))
 
-        installed = results[0].item
-
-        trigger_event(
-            StockEvents.ITEM_INSTALLED_INTO_ASSEMBLY,
-            id=installed.pk,
-            assembly_id=self.pk,
-        )
-
-        return installed
+        return results[0].item
 
     @transaction.atomic
     def uninstall_into_location(self, location, user, notes):

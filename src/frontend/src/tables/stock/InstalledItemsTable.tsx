@@ -132,7 +132,7 @@ export default function InstalledItemsTable({
             rowActions: rowActions,
             modelType: ModelType.stockitem,
             params: {
-              belongs_to: stockItem.pk,
+              installed_in: stockItem.pk,
               part_detail: true
             }
           }}

@@ -22,6 +22,7 @@ import {
   useUserSettingsState
 } from '../../states/SettingsStates';
 import { Thumbnail } from '../images/Thumbnail';
+import { consumerDescription } from '../render/Consumer';
 import { TableStatusRenderer } from '../render/StatusRenderer';
 import { RenderOwner } from '../render/User';
 import { ProjectCodeHoverCard, TableHoverCard } from './TableHoverCard';
@@ -170,33 +171,11 @@ export function StockColumn(props: StockColumnProps): TableColumn {
             size='sm'
           >{t`This stock item is in production`}</Text>
         );
-      } else if (stock_item.sales_order) {
+      } else if (stock_item.consumed_by_model_type) {
         extra.push(
-          <Text
-            key='sales-order'
-            size='sm'
-          >{t`This stock item has been assigned to a sales order`}</Text>
-        );
-      } else if (stock_item.customer) {
-        extra.push(
-          <Text
-            key='customer'
-            size='sm'
-          >{t`This stock item has been assigned to a customer`}</Text>
-        );
-      } else if (stock_item.belongs_to) {
-        extra.push(
-          <Text
-            key='belongs-to'
-            size='sm'
-          >{t`This stock item is installed in another stock item`}</Text>
-        );
-      } else if (stock_item.consumed_by) {
-        extra.push(
-          <Text
-            key='consumed-by'
-            size='sm'
-          >{t`This stock item has been consumed by a build order`}</Text>
+          <Text key='consumed-by' size='sm'>
+            {consumerDescription(stock_item.consumed_by_model_type)}
+          </Text>
         );
       } else if (!stock_item.in_stock) {
         extra.push(

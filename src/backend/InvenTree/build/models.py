@@ -62,9 +62,8 @@ from generic.states import (
     inventree_transition,
 )
 from plugin.base.integration.AllocateMixin import apply_allocate_mixin
-from plugin.events import bulk_trigger_event, trigger_event
+from plugin.events import trigger_event
 from stock.consume import ConsumeRequest, consume_stock
-from stock.events import StockEvents
 from stock.status_codes import StockHistoryCode, StockStatus
 
 logger = structlog.get_logger('inventree')
@@ -274,6 +273,24 @@ class Build(
     def __str__(self):
         """String representation of a BuildOrder."""
         return self.reference
+
+    def get_consumed_stock(self, include_installed: bool = True) -> QuerySet:
+        """Return the stock items consumed by this build order.
+
+        Arguments:
+            include_installed: If True, include stock items installed into the
+                outputs of this build order (e.g. trackable components)
+        """
+        StockItem = stock.models.StockItem
+
+        query = StockItem.consumed_by_filter(self)
+
+        if include_installed:
+            query |= StockItem.consumer_type_filter(StockItem) & Q(
+                consumed_by_model_id__in=self.build_outputs.values('pk')
+            )
+
+        return StockItem.objects.filter(query)
 
     def get_absolute_url(self):
         """Return the web URL associated with this BuildOrder."""
@@ -792,8 +809,6 @@ class Build(
         # This is because the required quantity may be less than the allocated quantity, and we need to split the allocation
         build_items_to_remove = set()
 
-        install_events = []
-
         for result in results:
             build_item = result.ref
             build_line = build_item.build_line
@@ -812,11 +827,6 @@ class Build(
                 # Ensure the build item points to the (possibly newly split) installed item
                 _item.stock_item = result.item
 
-                install_events.append((
-                    (),
-                    {'id': result.item.pk, 'assembly_id': result.consumer.pk},
-                ))
-
             # If the total item quantity is now zero, we can remove the build item from the database
             if _item.quantity <= 0:
                 build_items_to_remove.add(_item.pk)
@@ -834,9 +844,6 @@ class Build(
 
         # Remove build items in "build_items_to_remove"
         BuildItem.objects.filter(pk__in=build_items_to_remove).delete()
-
-        # Queue the (legacy) ITEM_INSTALLED_INTO_ASSEMBLY plugin events in bulk
-        bulk_trigger_event(StockEvents.ITEM_INSTALLED_INTO_ASSEMBLY, install_events)
 
     @transaction.atomic
     def complete_outstanding_allocations(self, user) -> None:

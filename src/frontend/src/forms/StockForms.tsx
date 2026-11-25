@@ -842,7 +842,7 @@ export function useDisassembleStockItem({
       api
         .get(apiUrl(ApiEndpoints.stock_item_list), {
           params: {
-            belongs_to: stockItem.pk,
+            installed_in: stockItem.pk,
             part_detail: true
           }
         })

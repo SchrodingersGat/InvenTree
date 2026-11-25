@@ -2993,7 +2993,8 @@ class BuildConsumeTest(BuildAPITest):
             task
             for task in OrmQ.objects.all()
             if task.func() == 'plugin.base.event.events.register_event'
-            and task.args() == (StockEvents.ITEM_INSTALLED_INTO_ASSEMBLY,)
+            and task.args() == (StockEvents.ITEM_CONSUMED,)
+            and task.kwargs().get('consumer_model_type') == 'stockitem'
         ]
         self.assertEqual(len(install_event_tasks), len(serials))
 
@@ -3011,8 +3012,8 @@ class BuildConsumeTest(BuildAPITest):
 
             self.assertTrue(
                 any(
-                    task.kwargs()
-                    == {'id': component_item.pk, 'assembly_id': output_item.pk}
+                    task.kwargs()['id'] == component_item.pk
+                    and task.kwargs()['consumer_id'] == output_item.pk
                     for task in install_event_tasks
                 )
             )

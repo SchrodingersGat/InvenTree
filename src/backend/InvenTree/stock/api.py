@@ -57,7 +57,6 @@ from InvenTree.mixins import (
     SerializerContextMixin,
 )
 from InvenTree.serializers import apply_duplicate_copy_options
-from order.models import SalesOrder
 from part.models import BomItem, Part, PartCategory
 from stock.generators import generate_batch_code, generate_serial_number
 from stock.models import (
@@ -621,37 +620,53 @@ class StockFilter(FilterSet):
         ]
 
     # Consumer filters (stock items consumed by a particular object)
-    @staticmethod
-    def filter_consumer_of_type(queryset, model, pk):
-        """Filter the queryset by stock items consumed by the specified object."""
+    consumed = rest_filters.BooleanFilter(label=_('Consumed'), method='filter_consumed')
+
+    def filter_consumed(self, queryset, name, value):
+        """Filter by whether the stock item has been consumed (by any consumer)."""
+        if str2bool(value):
+            return queryset.exclude(consumed_by_model_type=None)
+        return queryset.filter(consumed_by_model_type=None)
+
+    consumed_by_model_type = rest_filters.ChoiceFilter(
+        label=_('Consumer Type'),
+        method='filter_consumed_by_model_type',
+        choices=StockSerializers.ConsumedByDetailSerializer.consumer_type_choices,
+    )
+
+    def filter_consumed_by_model_type(self, queryset, name, value):
+        """Filter by the type of the object which consumed the stock item."""
+        return queryset.filter(consumed_by_model_type__model=value)
+
+    consumed_by_model_id = rest_filters.NumberFilter(
+        label=_('Consumer ID'), field_name='consumed_by_model_id'
+    )
+
+    build_consumed = rest_filters.NumberFilter(
+        label=_('Consumed by Build Order'), method='filter_build_consumed'
+    )
+
+    def filter_build_consumed(self, queryset, name, value):
+        """Filter by stock consumed by a build order (including stock installed into its outputs)."""
+        build_order = Build.objects.filter(pk=value).first()
+
+        if build_order is None:
+            return queryset.none()
+
         return queryset.filter(
-            consumed_by_model_type=ContentType.objects.get_for_model(model),
-            consumed_by_model_id=pk,
+            pk__in=build_order.get_consumed_stock(include_installed=True).values('pk')
         )
 
-    belongs_to = rest_filters.NumberFilter(
-        label=_('Installed In'), method='filter_belongs_to'
+    installed_in = rest_filters.NumberFilter(
+        label=_('Installed In'), method='filter_installed_in'
     )
 
-    def filter_belongs_to(self, queryset, name, value):
+    def filter_installed_in(self, queryset, name, value):
         """Filter by the stock item which the stock is installed in."""
-        return self.filter_consumer_of_type(queryset, StockItem, value)
-
-    consumed_by = rest_filters.NumberFilter(
-        label=_('Consumed By Build Order'), method='filter_consumed_by'
-    )
-
-    def filter_consumed_by(self, queryset, name, value):
-        """Filter by the build order which consumed the stock."""
-        return self.filter_consumer_of_type(queryset, Build, value)
-
-    sales_order = rest_filters.NumberFilter(
-        label=_('Sales Order'), method='filter_sales_order'
-    )
-
-    def filter_sales_order(self, queryset, name, value):
-        """Filter by the sales order which the stock was shipped against."""
-        return self.filter_consumer_of_type(queryset, SalesOrder, value)
+        return queryset.filter(
+            consumed_by_model_type=ContentType.objects.get_for_model(StockItem),
+            consumed_by_model_id=value,
+        )
 
     customer = rest_filters.NumberFilter(label=_('Customer'), method='filter_customer')
 
@@ -919,26 +934,6 @@ class StockFilter(FilterSet):
 
         return queryset.filter(q_batch).filter(q_serial).distinct()
 
-    consumed = rest_filters.BooleanFilter(
-        label=_('Consumed by Build Order'), method='filter_consumed'
-    )
-
-    def filter_consumed(self, queryset, name, value):
-        """Filter by whether the stock item has been consumed by a build order."""
-        if str2bool(value):
-            return queryset.filter(StockItem.consumer_type_filter(Build))
-        return queryset.exclude(StockItem.consumer_type_filter(Build))
-
-    installed = rest_filters.BooleanFilter(
-        label=_('Installed in other stock item'), method='filter_installed'
-    )
-
-    def filter_installed(self, queryset, name, value):
-        """Filter stock items by whether they are installed in another stock item."""
-        if str2bool(value):
-            return queryset.filter(StockItem.consumer_type_filter(StockItem))
-        return queryset.exclude(StockItem.consumer_type_filter(StockItem))
-
     has_installed_items = rest_filters.BooleanFilter(
         label='Has installed items', method='filter_has_installed'
     )
@@ -958,16 +953,6 @@ class StockFilter(FilterSet):
         if str2bool(value):
             return queryset.filter(child_items__gt=0)
         return queryset.filter(child_items=0)
-
-    sent_to_customer = rest_filters.BooleanFilter(
-        label='Sent to customer', method='filter_sent_to_customer'
-    )
-
-    def filter_sent_to_customer(self, queryset, name, value):
-        """Filter by sent to customer."""
-        if str2bool(value):
-            return queryset.filter(StockItem.customer_filter())
-        return queryset.exclude(StockItem.customer_filter())
 
     depleted = rest_filters.BooleanFilter(label='Depleted', method='filter_depleted')
 

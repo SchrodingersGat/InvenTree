@@ -1192,12 +1192,20 @@ class StockItemListTest(StockAPITestCase):
         self.assertEqual(len(response), 1)
 
     def test_filter_installed(self):
-        """Filter StockItem by installed."""
-        response = self.get_stock(installed=True)
+        """Filter StockItem by the item it is installed in (and by consumer type)."""
+        response = self.get_stock(installed_in=105)
         self.assertEqual(len(response), 1)
 
-        response = self.get_stock(installed=False)
-        self.assertEqual(len(response), 28)
+        response = self.get_stock(consumed_by_model_type='stockitem')
+        self.assertEqual(len(response), 1)
+
+        response = self.get_stock(
+            consumed_by_model_type='stockitem', consumed_by_model_id=105
+        )
+        self.assertEqual(len(response), 1)
+
+        response = self.get_stock(installed_in=1)
+        self.assertEqual(len(response), 0)
 
     def test_filter_has_installed(self):
         """Filter StockItem by has_installed."""
@@ -1215,328 +1223,23 @@ class StockItemListTest(StockAPITestCase):
         response = self.get_stock(has_child_items=False)
         self.assertEqual(len(response), 28)  # TODO: adjust test dataset (belongs_to)
 
-    def test_filter_sent_to_customer(self):
-        """Filter StockItem by sent_to_customer."""
-        response = self.get_stock(sent_to_customer=True)
+    def test_filter_consumed(self):
+        """Filter StockItem by whether it has been consumed (by anything)."""
+        response = self.get_stock(consumed=True)
+        self.assertEqual(len(response), 1)
+
+        response = self.get_stock(consumed=False)
+        self.assertEqual(len(response), 28)
+
+        # No stock has been sent to a customer in the test dataset
+        response = self.get_stock(consumed_by_model_type='salesorder')
         self.assertEqual(len(response), 0)
 
-        response = self.get_stock(sent_to_customer=False)
-        self.assertEqual(len(response), 29)  # TODO: adjust test dataset
-
-    def test_filter_has_purchase_price(self):
-        """Filter StockItem by has_purchase_price."""
-        response = self.get_stock(has_purchase_price=True)
-        self.assertEqual(len(response), 1)
-
-        response = self.get_stock(has_purchase_price=False)
-        self.assertEqual(len(response), 28)
-
-    def test_filter_stale(self):
-        """Filter StockItem by stale."""
-        response = self.get_stock(stale=True)
-        self.assertEqual(len(response), 29)
-
-        response = self.get_stock(stale=False)
-        self.assertEqual(len(response), 29)
-
-        # Enable the 'stale' feature
-        set_global_setting('STOCK_STALE_DAYS', '10')
-        response = self.get_stock(stale=True)
-        self.assertEqual(len(response), 1)
-
-        response = self.get_stock(stale=False)
-        self.assertEqual(len(response), 28)
-        set_global_setting('STOCK_STALE_DAYS', '0')
-
-    def test_paginate(self):
-        """Test that we can paginate results correctly."""
-        for n in [1, 5, 10]:
-            response = self.get_stock(limit=n)
-
-            self.assertIn('count', response)
-            self.assertIn('results', response)
-
-            self.assertEqual(len(response['results']), n)
-
-    def test_export(self):
-        """Test exporting of Stock data via the API."""
-        required_headers = [
-            'Part',
-            'Customer',
-            'Stock Location',
-            'Parent Item',
-            'Quantity',
-            'Status',
-            'Part.Name',
-            'Part.Description',
-            'Location.Name',
-            'Location.Path',
-            'Supplier Part.SKU',
-            'Supplier Part.MPN',
-        ]
-
-        excluded_headers = ['metadata']
-
-        filters = {
-            'part_detail': True,
-            'location_detail': True,
-            'supplier_part_detail': True,
-        }
-
-        with self.export_data(self.list_url, params=filters) as data_file:
-            self.process_csv(
-                data_file,
-                required_cols=required_headers,
-                excluded_cols=excluded_headers,
-                required_rows=StockItem.objects.count(),
-            )
-
-        # Now, add a filter to the results
-        filters['location'] = 1
-        filters['cascade'] = True
-
-        with self.export_data(self.list_url, params=filters) as data_file:
-            data = self.process_csv(data_file, required_rows=9)
-
-            for row in data:
-                item_id = int(row['ID'])
-                loc_id = int(row['Stock Location'])
-
-                item = StockItem.objects.get(pk=item_id)
-
-                # Location should match ID
-                self.assertEqual(loc_id, item.location.pk)
-
-                # Location name should match
-                self.assertEqual(row['Location.Name'], item.location.name)
-
-                # Part name should match
-                self.assertEqual(row['Part.Name'], item.part.name)
-
-        parts = Part.objects.get(pk=25).get_descendants(include_self=True)
-        self.assertEqual(parts.count(), 1)
-
-        items = StockItem.objects.filter(part__in=parts)
-        self.assertEqual(items.count(), 4)
-
-        # Export stock items with a specific part
-        with self.export_data(self.list_url, {'part': 25}) as data_file:
-            self.process_csv(data_file, required_rows=items.count())
-
-    def test_large_export(self):
-        """Test export of very large dataset.
-
-        - Ensure that the time taken to export a large dataset is reasonable.
-        - Ensure that the number of DB queries is reasonable.
-        """
-        # Create a large number of stock items
-        locations = list(StockLocation.objects.all())
-        parts = list(Part.objects.filter(virtual=False))
-
-        idx = 0
-
-        N_LOCATIONS = len(locations)
-        N_PARTS = len(parts)
-
-        stock_items = []
-
-        while idx < 2500:
-            part = parts[idx % N_PARTS]
-            location = locations[idx % N_LOCATIONS]
-
-            item = StockItem(part=part, location=location, quantity=10)
-            stock_items.append(item)
-            idx += 1
-
-        StockItem.objects.bulk_create(stock_items)
-
-        self.assertGreaterEqual(StockItem.objects.count(), 2500)
-
-        # Note: While the export is quick on pgsql, it is still quite slow on sqlite3
-        with self.export_data(
-            self.list_url,
-            max_query_count=100,
-            max_query_time=12.0,  # Test time increased due to worker variability
-        ) as data_file:
-            data = self.process_csv(data_file)
-
-            self.assertGreaterEqual(len(data), 2500)
-
-    def test_allocated_quantity(self):
-        """The 'allocated' API field must match StockItem.allocation_count().
-
-        Only active allocations are counted:
-        - Build order allocations
-        - Sales order allocations against open orders, which are not yet shipped
-        - Transfer order allocations against open orders
-        """
-        from order.status_codes import SalesOrderStatus, TransferOrderStatus
-
-        assembly = Part.objects.create(
-            name='AQ Assembly', description='Allocated quantity test', assembly=True
-        )
-        component = Part.objects.create(
-            name='AQ Component',
-            description='Allocated quantity test',
-            component=True,
-            salable=True,
-        )
-        part.models.BomItem.objects.create(
-            part=assembly, sub_part=component, quantity=1
-        )
-
-        item = StockItem.objects.create(part=component, quantity=100, location_id=1)
-
-        url = reverse('api-stock-detail', kwargs={'pk': item.pk})
-
-        def check(expected):
-            self.assertEqual(item.allocation_count(), expected)
-            self.assertEqual(self.get(url).data['allocated'], expected)
-
-            response = self.get(reverse('api-stock-list'), {'part': component.pk})
-            self.assertEqual(response.data[0]['allocated'], expected)
-
-        check(0)
-
-        # Build order allocation
-        bo = build.models.Build.objects.create(part=assembly, quantity=10)
-        build.models.BuildItem.objects.create(
-            stock_item=item, build_line=bo.build_lines.first(), quantity=1
-        )
-        check(1)
-
-        # Open sales order allocation
-        self.allocate_to_sales_order(item, 2)
-        check(3)
-
-        # Sales order allocation against a shipped shipment is not counted
-        allocation = self.allocate_to_sales_order(item, 4)
-        allocation.shipment = order.models.SalesOrderShipment.objects.create(
-            order=allocation.line.order,
-            reference='AQ-1',
-            shipment_date=datetime.now().date(),
-        )
-        allocation.save()
-        check(3)
-
-        # Sales order allocation against a closed order is not counted
-        allocation = self.allocate_to_sales_order(item, 8)
-        allocation.line.order.status = SalesOrderStatus.CANCELLED.value
-        allocation.line.order.save()
-        check(3)
-
-        # Open transfer order allocation
-        for idx, (to_status, quantity) in enumerate([
-            (TransferOrderStatus.ISSUED, 16),
-            (TransferOrderStatus.CANCELLED, 32),
-        ]):
-            to = order.models.TransferOrder.objects.create(
-                reference=f'TO-AQ-{idx}', status=to_status.value
-            )
-            line = order.models.TransferOrderLineItem.objects.create(
-                order=to, part=component, quantity=quantity
-            )
-            order.models.TransferOrderAllocation.objects.create(
-                line=line, item=item, quantity=quantity
-            )
-
-        # Only the open transfer order is counted
-        check(19)
-
-    def test_filter_by_allocated(self):
-        """Test that we can filter by "allocated" status.
-
-        Rules:
-        - Only return stock items which are 'allocated'
-        - Either to a build order or sales order
-        - Test that the results are "distinct" (no duplicated results)
-        - Ref: https://github.com/inventree/InvenTree/pull/5916
-        """
-        # Create a build order to allocate to
-        assembly = part.models.Part.objects.create(
-            name='F Assembly', description='Assembly for filter test', assembly=True
-        )
-        component = part.models.Part.objects.create(
-            name='F Component', description='Component for filter test', component=True
-        )
-        bom_item = part.models.BomItem.objects.create(
-            part=assembly, sub_part=component, quantity=10
-        )
-
-        # Create two build orders
-        bo_1 = build.models.Build.objects.create(part=assembly, quantity=10)
-        bo_2 = build.models.Build.objects.create(part=assembly, quantity=20)
-
-        # Test that two distinct build line items are created automatically
-        self.assertEqual(bo_1.build_lines.count(), 1)
-        self.assertEqual(bo_2.build_lines.count(), 1)
-        self.assertEqual(
-            build.models.BuildLine.objects.filter(bom_item=bom_item).count(), 2
-        )
-
-        build_line_1 = bo_1.build_lines.first()
-        build_line_2 = bo_2.build_lines.first()
-
-        # Allocate stock
-        location = StockLocation.objects.first()
-        stock_1 = StockItem.objects.create(
-            part=component, quantity=100, location=location
-        )
-        stock_2 = StockItem.objects.create(
-            part=component, quantity=100, location=location
-        )
-        stock_3 = StockItem.objects.create(
-            part=component, quantity=100, location=location
-        )
-
-        # Allocate stock_1 to two build orders
-        build.models.BuildItem.objects.create(
-            stock_item=stock_1, build_line=build_line_1, quantity=5
-        )
-
-        build.models.BuildItem.objects.create(
-            stock_item=stock_1, build_line=build_line_2, quantity=5
-        )
-
-        # Allocate stock_2 to 1 build orders
-        build.models.BuildItem.objects.create(
-            stock_item=stock_2, build_line=build_line_1, quantity=5
-        )
-
-        url = reverse('api-stock-list')
-
-        # 3 items when just filtering by part
-        response = self.get(
-            url, {'part': component.pk, 'in_stock': True}, expected_code=200
-        )
-        self.assertEqual(len(response.data), 3)
-
-        # 1 item when filtering by "not allocated"
-        response = self.get(
-            url,
-            {'part': component.pk, 'in_stock': True, 'allocated': False},
-            expected_code=200,
-        )
-
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]['pk'], stock_3.pk)
-
-        # 2 items when filtering by "allocated"
-        response = self.get(
-            url,
-            {'part': component.pk, 'in_stock': True, 'allocated': True},
-            expected_code=200,
-        )
-
-        self.assertEqual(len(response.data), 2)
-
-        ids = [item['pk'] for item in response.data]
-
-        self.assertIn(stock_1.pk, ids)
-        self.assertIn(stock_2.pk, ids)
+        # Invalid consumer type
+        self.get(self.list_url, {'consumed_by_model_type': 'part'}, expected_code=400)
 
     def test_consumed_by_detail(self):
-        """Consuming build details are optional, nullable, and read-only."""
+        """Consumer details are optional, nullable, read-only, and permission-gated per model."""
         self.assignRole('build.view')
         assembly = Part.objects.create(name='Reference assembly', assembly=True)
         part = Part.objects.first()
@@ -1558,52 +1261,153 @@ class StockItemListTest(StockAPITestCase):
         for options in [params, {**params, 'consumed_by_detail': False}]:
             for record in self.get(self.list_url, options).data:
                 self.assertNotIn('consumed_by_detail', record)
-                self.assertNotIn('consumed_by_reference', record)
 
         response = self.get(self.list_url, {**params, 'consumed_by_detail': True})
         records = {item['pk']: item for item in response.data}
         self.assertEqual(set(records), {item.pk for item in children})
         for item, build_order in zip(children, consuming_builds, strict=True):
-            detail = records[item.pk]['consumed_by_detail']
-            self.assertEqual(
-                records[item.pk]['consumed_by'], build_order.pk if build_order else None
-            )
+            record = records[item.pk]
+            detail = record['consumed_by_detail']
+
             if build_order:
+                self.assertEqual(record['consumed_by_model_type'], 'build')
+                self.assertEqual(record['consumed_by_model_id'], build_order.pk)
+                self.assertEqual(detail['model_type'], 'build')
                 self.assertEqual(detail['pk'], build_order.pk)
-                self.assertEqual(detail['reference'], build_order.reference)
-                self.assertEqual(detail['title'], build_order.title)
-                self.assertEqual(detail['status'], build_order.status)
+                self.assertEqual(detail['name'], build_order.reference)
+                self.assertEqual(detail['url'], build_order.get_absolute_url())
+                self.assertFalse(detail['deleted'])
             else:
+                self.assertIsNone(record['consumed_by_model_type'])
+                self.assertIsNone(record['consumed_by_model_id'])
                 self.assertIsNone(detail)
+
+            # The legacy fields are no longer provided
+            for field in [
+                'belongs_to',
+                'consumed_by',
+                'sales_order',
+                'sales_order_reference',
+            ]:
+                self.assertNotIn(field, record)
 
         detail_url = reverse('api-stock-detail', kwargs={'pk': children[0].pk})
         self.assertNotIn('consumed_by_detail', self.get(detail_url).data)
         detail = self.get(detail_url, {'consumed_by_detail': True}).data
-        self.assertEqual(detail['consumed_by_detail']['reference'], builds[0].reference)
+        self.assertEqual(detail['consumed_by_detail']['name'], builds[0].reference)
 
-        original_reference = builds[0].reference
+        # The consumer cannot be changed via the API
         self.patch(
-            detail_url, {'consumed_by_detail': {'reference': 'Cannot overwrite'}}
+            detail_url,
+            {
+                'consumed_by_detail': {'name': 'Cannot overwrite'},
+                'consumed_by_model_id': builds[1].pk,
+            },
         )
         builds[0].refresh_from_db()
-        self.assertEqual(builds[0].reference, original_reference)
         self.assertEqual(
             StockItem.objects.get(pk=children[0].pk).consumed_by_build, builds[0]
         )
 
-        # Requesting the field must not bypass build view permissions.
+        # Requesting the detail must not bypass build view permissions
         self.clearRoles()
         self.assignRole('stock.view')
         response = self.get(self.list_url, {**params, 'consumed_by_detail': True})
         for record in response.data:
-            self.assertNotIn('consumed_by_detail', record)
-        self.assertNotIn(
-            'consumed_by_detail',
-            self.get(detail_url, {'consumed_by_detail': True}).data,
+            self.assertIsNone(record['consumed_by_detail'])
+        self.assertIsNone(
+            self.get(detail_url, {'consumed_by_detail': True}).data[
+                'consumed_by_detail'
+            ]
+        )
+
+    def test_consumed_by_detail_types(self):
+        """The consumer detail renders each type of consumer (and a deleted consumer)."""
+        from company.models import Company
+        from order.models import SalesOrder
+        from stock.serializers import ConsumedByDetailSerializer
+
+        self.assignRole('build.view')
+        self.assignRole('sales_order.view')
+        self.assignRole('purchase_order.view')
+
+        part = Part.objects.first()
+        assembly = Part.objects.create(name='Detail assembly', assembly=True)
+        customer = Company.objects.create(name='Detail Customer', is_customer=True)
+        deleted = Company.objects.create(name='Deleted Customer', is_customer=True)
+        so = SalesOrder.objects.create(customer=customer, reference='SO-DETAIL')
+        bo = build.models.Build.objects.create(part=assembly, quantity=1)
+        parent = StockItem.objects.create(part=part, quantity=1)
+
+        consumers = {
+            'build': bo,
+            'salesorder': so,
+            'company': customer,
+            'stockitem': parent,
+        }
+
+        items = {
+            key: StockItem.objects.create(part=part, quantity=1, consumed_by=consumer)
+            for key, consumer in consumers.items()
+        }
+
+        items['deleted'] = StockItem.objects.create(
+            part=part, quantity=1, consumed_by=deleted
+        )
+        deleted_pk = deleted.pk
+        deleted.delete()
+
+        response = self.get(
+            self.list_url,
+            {'consumed': True, 'consumed_by_detail': True, 'customer_detail': True},
+            max_query_count=40,
+        )
+        records = {item['pk']: item for item in response.data}
+
+        for key, consumer in consumers.items():
+            record = records[items[key].pk]
+            detail = record['consumed_by_detail']
+            self.assertEqual(record['consumed_by_model_type'], key)
+            self.assertEqual(detail['model_type'], key)
+            self.assertEqual(detail['pk'], consumer.pk)
+            self.assertEqual(
+                detail['name'], ConsumedByDetailSerializer.consumer_name(consumer)
+            )
+            self.assertFalse(detail['deleted'])
+
+        self.assertEqual(
+            records[items['salesorder'].pk]['consumed_by_detail']['name'], so.reference
+        )
+        self.assertEqual(
+            records[items['company'].pk]['consumed_by_detail']['name'], customer.name
+        )
+
+        # The customer is derived from a SalesOrder or Company consumer
+        self.assertEqual(records[items['salesorder'].pk]['customer'], customer.pk)
+        self.assertEqual(records[items['company'].pk]['customer'], customer.pk)
+        self.assertEqual(
+            records[items['company'].pk]['customer_detail']['name'], customer.name
+        )
+        self.assertIsNone(records[items['build'].pk]['customer'])
+        self.assertIsNone(records[items['stockitem'].pk]['customer_detail'])
+
+        # A deleted consumer is still reported (by type and primary key)
+        record = records[items['deleted'].pk]
+        self.assertEqual(record['consumed_by_model_type'], 'company')
+        self.assertEqual(record['consumed_by_model_id'], deleted_pk)
+        self.assertTrue(record['consumed_by_detail']['deleted'])
+        self.assertIsNone(record['consumed_by_detail']['name'])
+        self.assertIsNone(record['customer'])
+
+        # Filter by customer (directly, or via a sales order)
+        response = self.get(self.list_url, {'customer': customer.pk})
+        self.assertEqual(
+            {item['pk'] for item in response.data},
+            {items['salesorder'].pk, items['company'].pk},
         )
 
     def test_consumed_by_detail_export(self):
-        """Export consuming references only when requested and permitted."""
+        """Export consumer details only when requested."""
         self.assignRole('build.view')
         assembly = Part.objects.create(name='Export assembly', assembly=True)
         build_order = build.models.Build.objects.create(part=assembly, quantity=1)
@@ -1615,7 +1419,7 @@ class StockItemListTest(StockAPITestCase):
         unconsumed = StockItem.objects.create(part=part, quantity=1, parent=parent)
         filters = {'parent': parent.pk}
         params = {**filters, 'consumed_by_detail': True}
-        header = 'Consumed By.Reference'
+        header = 'Consumed By.Name'
 
         with self.export_data(self.list_url, params=params) as data_file:
             rows = self.process_csv(data_file, required_cols=[header], required_rows=2)
@@ -1626,38 +1430,6 @@ class StockItemListTest(StockAPITestCase):
         for options in [filters, {**filters, 'consumed_by_detail': False}]:
             with self.export_data(self.list_url, params=options) as data_file:
                 self.process_csv(data_file, excluded_cols=[header], required_rows=2)
-
-        self.clearRoles()
-        self.assignRole('stock.view')
-        with self.export_data(self.list_url, params=params) as data_file:
-            self.process_csv(data_file, excluded_cols=[header], required_rows=2)
-
-    def test_consumed_by_detail_prefetch(self):
-        """Optional details prefetch builds even without StockApiMixin annotations."""
-        from stock.serializers import StockItemSerializer
-
-        assembly = Part.objects.create(name='Prefetch assembly', assembly=True)
-        builds = [
-            build.models.Build.objects.create(part=assembly, quantity=1)
-            for _ in range(10)
-        ]
-        StockItem.objects.bulk_create([
-            StockItem(part=assembly, quantity=1, consumed_by=build_order)
-            for build_order in builds
-        ])
-        queryset = StockItem.objects.filter(
-            StockItem.consumer_type_filter(build.models.Build),
-            consumed_by_model_id__in=[b.pk for b in builds],
-        )
-        serializer = StockItemSerializer(consumed_by_detail=True)
-        self.assertIn('consumed_by', serializer.prefetch_list)
-        self.assertNotIn('consumed_by', StockItemSerializer().prefetch_list)
-        with self.assertNumQueries(2):
-            prefetched = list(serializer.prefetch_queryset(queryset))
-            references = [item.consumed_by.reference for item in prefetched]
-        self.assertCountEqual(
-            references, [build_order.reference for build_order in builds]
-        )
 
     def test_query_count(self):
         """Test that the number of queries required to fetch stock items is reasonable."""

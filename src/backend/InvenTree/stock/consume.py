@@ -343,7 +343,7 @@ def consume_stock(
                 {
                     'id': result.item.pk,
                     'quantity': float(result.quantity),
-                    'consumer_model_type': result.consumer._meta.label_lower,
+                    'consumer_model_type': result.consumer._meta.model_name,
                     'consumer_id': result.consumer.pk,
                 },
             )

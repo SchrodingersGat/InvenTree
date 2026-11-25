@@ -6,12 +6,12 @@ import { clearTableFilters, loadTab, navigate } from '../helpers.js';
 import { doCachedLogin } from '../login.js';
 
 for (const savedFilter of [false, true]) {
-  test(`Stock - Consuming builds${savedFilter ? ' with saved filter' : ''}`, async ({
+  test(`Stock - Consumers${savedFilter ? ' with saved filter' : ''}`, async ({
     browser
   }) => {
     const api = await createApi({});
     const stockIds: number[] = [];
-    const buildIds: number[] = [];
+    const companyIds: number[] = [];
     let locationId: number | undefined;
     let partId: number | undefined;
 
@@ -26,21 +26,23 @@ for (const savedFilter of [false, true]) {
       const part = await create('part/', {
         name: `Consumed reference ${generateUUID().slice(0, 8)}`,
         assembly: true,
-        component: true
+        component: true,
+        salable: true
       });
       partId = part.pk;
       const parent = await create('stock/', { part: partId, quantity: 10 });
       stockIds.push(parent.pk);
 
-      const builds = [];
+      // Each consumer is a customer, which the stock is assigned to
+      const consumers = [];
       for (let index = 0; index < 2; index++) {
-        const build = await create('build/', {
-          part: partId,
-          quantity: 1,
-          title: `Reference test ${index}`
+        const customer = await create('company/', {
+          name: `Consumer ${index} ${generateUUID().slice(0, 8)}`,
+          description: 'Consumer',
+          is_customer: true
         });
-        builds.push(build);
-        buildIds.push(build.pk);
+        consumers.push({ ...customer, reference: customer.name });
+        companyIds.push(customer.pk);
       }
 
       const location = await create('stock/location/', {
@@ -50,7 +52,7 @@ for (const savedFilter of [false, true]) {
 
       // Partial transfers create children; the parent field is read-only.
       const children = [];
-      for (const build of [...builds, null]) {
+      for (const consumer of [...consumers, null]) {
         const response = await api.post('stock/transfer/', {
           data: {
             location: locationId,
@@ -67,16 +69,22 @@ for (const savedFilter of [false, true]) {
         expect(child).toBeTruthy();
         stockIds.push(child.pk);
         const patch = await api.patch(`stock/${child.pk}/`, {
-          data: {
-            batch: `Reference-${generateUUID().slice(0, 8)}`,
-            consumed_by: build?.pk ?? null
-          }
+          data: { batch: `Reference-${generateUUID().slice(0, 8)}` }
         });
         expect(patch.ok(), await patch.text()).toBeTruthy();
+
+        // Consume the stock item, by assigning it to the customer
+        if (consumer) {
+          const assign = await api.post('stock/assign/', {
+            data: { items: [{ item: child.pk }], customer: consumer.pk }
+          });
+          expect(assign.ok(), await assign.text()).toBeTruthy();
+        }
+
         children.push(await patch.json());
       }
 
-      const unconsumedChild = children[builds.length];
+      const unconsumedChild = children[consumers.length];
       const page = await doCachedLogin(browser);
       const childRequests: URL[] = [];
       page.on('request', (request) => {
@@ -112,19 +120,19 @@ for (const savedFilter of [false, true]) {
           page.getByRole('cell', { name: unconsumedChild.batch, exact: true })
         ).toBeVisible();
         await expect(
-          page.getByRole('link', { name: builds[0].reference, exact: true })
+          page.getByRole('link', { name: consumers[0].reference, exact: true })
         ).toHaveCount(0);
         await page.reload();
         await expect(
           page.getByRole('cell', { name: unconsumedChild.batch, exact: true })
         ).toBeVisible();
         await expect(
-          page.getByRole('link', { name: builds[0].reference, exact: true })
+          page.getByRole('link', { name: consumers[0].reference, exact: true })
         ).toHaveCount(0);
         await clearTableFilters(page);
       }
 
-      for (const [index, build] of builds.entries()) {
+      for (const [index, consumer] of consumers.entries()) {
         const row = page.getByRole('row').filter({
           has: page.getByRole('cell', {
             name: children[index].batch,
@@ -133,11 +141,8 @@ for (const savedFilter of [false, true]) {
         });
         await expect(row).toBeVisible();
         await expect(
-          row.getByRole('link', { name: build.reference, exact: true })
-        ).toHaveAttribute(
-          'href',
-          `/web/manufacturing/build-order/${build.pk}/`
-        );
+          row.getByRole('link', { name: consumer.reference, exact: true })
+        ).toHaveAttribute('href', `/web/company/${consumer.pk}/`);
       }
 
       expect(childRequests.length).toBeGreaterThan(0);
@@ -173,11 +178,9 @@ for (const savedFilter of [false, true]) {
           .check();
         await page.keyboard.press('Escape');
         await page
-          .getByRole('link', { name: builds[0].reference, exact: true })
+          .getByRole('link', { name: consumers[0].reference, exact: true })
           .click();
-        await expect(page).toHaveURL(
-          new RegExp(`/manufacturing/build-order/${builds[0].pk}`)
-        );
+        await expect(page).toHaveURL(new RegExp(`/company/${consumers[0].pk}`));
         await navigate(page, `part/${partId}/stock`);
         await expect(header).toHaveCount(0);
         await page.getByLabel('table-select-columns').click();
@@ -194,24 +197,8 @@ for (const savedFilter of [false, true]) {
 
         for (const pk of stockIds.reverse())
           await cleanup(await api.delete(`stock/${pk}/`));
-        for (const pk of buildIds) {
-          await cleanup(
-            await api.post(`build/${pk}/cancel/`, {
-              data: {
-                remove_allocated_stock: false,
-                remove_incomplete_outputs: true
-              }
-            })
-          );
-          // Cancellation runs in the worker; wait for its committed state.
-          await expect
-            .poll(
-              async () => (await (await api.get(`build/${pk}/`)).json()).status,
-              { timeout: 15000 }
-            )
-            .toBe(30);
-          await cleanup(await api.delete(`build/${pk}/`));
-        }
+        for (const pk of companyIds)
+          await cleanup(await api.delete(`company/${pk}/`));
 
         if (partId) {
           await cleanup(
