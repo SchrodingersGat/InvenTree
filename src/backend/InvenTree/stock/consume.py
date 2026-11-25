@@ -19,7 +19,6 @@ from decimal import Decimal
 from typing import Any, Optional
 
 from django.apps import apps
-from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Model
@@ -415,9 +414,7 @@ def release_stock(
 
     # The consumer may have been deleted (KEEP policy), leaving a dangling reference
     consumer = item.consumed_by
-    consumer_model = ContentType.objects.get_for_id(
-        item.consumed_by_model_type_id
-    ).model_class()
+    consumer_model = item.consumer_model
 
     if location and location.structural:
         raise ValidationError({

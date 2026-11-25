@@ -111,6 +111,8 @@ The available events are provided in the enumerations listed below. Note that wh
 
 ### Stock Events
 
+The arguments passed with the `stockitem.consumed` event are described in the [stock consumption](../../stock/consumption.md#plugin-events) documentation.
+
 ::: stock.events.StockEvents
     options:
         show_bases: False

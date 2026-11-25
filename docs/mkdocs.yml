@@ -158,6 +158,7 @@ nav:
   - Stock:
     - Stock Items: stock/index.md
     - Availability: stock/availability.md
+    - Stock Consumption: stock/consumption.md
     - Traceability: stock/traceability.md
     - Stock Tracking: stock/tracking.md
     - Stock Status: stock/status.md

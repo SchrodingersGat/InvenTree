@@ -36,6 +36,8 @@ For example, if a stock item has an *In Stock* quantity of 100, and 30 units hav
 
 Once allocated stock quantities are consumed (e.g. when fulfilling an order or completing a build), the *In Stock* quantity of the stock item is reduced accordingly. This means that the *Available* quantity is also reduced.
 
+Consumed stock is no longer available - refer to [Stock Consumption](./consumption.md) for further information.
+
 ### Delete on Deplete
 
 Stock items can be designated with the `Delete on Deplete` flag. When this flag is set, if the stock quantity of the item reaches zero, the stock item will be automatically deleted from the system.

@@ -3542,7 +3542,7 @@ class ReturnOrder(AuditedOrderMixin, TotalPriceMixin, Order):
             - Transfers the StockItem to the specified location
             - Marks the StockItem as "quarantined"
             - Adds a tracking entry to the StockItem
-            - Removes the 'customer' reference from the StockItem
+            - Releases the StockItem from its consumer (e.g. the customer or sales order)
         """
         # Lock the line item row against concurrent receipt, and re-read it
         # from the database. Without this, two simultaneous receipt requests
@@ -3606,7 +3606,8 @@ class ReturnOrder(AuditedOrderMixin, TotalPriceMixin, Order):
             ):
                 stock_item.save(add_note=False)
 
-        stock_item.clearAllocations()
+            # Note: release_stock() also clears allocations
+            stock_item.clearAllocations()
 
         # Update the LineItem
         line.received_date = InvenTree.helpers.current_date()

@@ -1221,7 +1221,7 @@ class StockItemListTest(StockAPITestCase):
         self.assertEqual(len(response), 1)
 
         response = self.get_stock(has_child_items=False)
-        self.assertEqual(len(response), 28)  # TODO: adjust test dataset (belongs_to)
+        self.assertEqual(len(response), 28)
 
     def test_filter_consumed(self):
         """Filter StockItem by whether it has been consumed (by anything)."""

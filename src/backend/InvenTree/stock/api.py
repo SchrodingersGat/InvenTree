@@ -939,7 +939,7 @@ class StockFilter(FilterSet):
     )
 
     def filter_has_installed(self, queryset, name, value):
-        """Filter stock items by "belongs_to" field being empty."""
+        """Filter stock items by whether other items are installed in them."""
         if str2bool(value):
             return queryset.filter(installed_items__gt=0)
         return queryset.filter(installed_items=0)
@@ -949,7 +949,7 @@ class StockFilter(FilterSet):
     )
 
     def filter_has_child_items(self, queryset, name, value):
-        """Filter stock items by "belongs_to" field being empty."""
+        """Filter stock items by whether they have child (split) items."""
         if str2bool(value):
             return queryset.filter(child_items__gt=0)
         return queryset.filter(child_items=0)

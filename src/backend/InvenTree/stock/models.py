@@ -483,7 +483,6 @@ class StockItem(
         build: Link to a Build (if this stock item was created from a build)
         is_building: Boolean field indicating if this stock item is currently being built (or is "in production")
         purchase_order: Link to a PurchaseOrder (if this stock item was created from a PurchaseOrder)
-        sales_order: Link to a SalesOrder object (if the StockItem has been assigned to a SalesOrder)
         consumed_by_model_type: Model type of the object which has consumed this StockItem (generic relation)
         consumed_by_model_id: Primary key of the object which has consumed this StockItem (generic relation)
         purchase_price: The unit purchase price for this StockItem - this is the unit price at time of purchase (if this item was purchased from an external supplier)
@@ -509,7 +508,7 @@ class StockItem(
     AUDIT_EXCLUDE_FIELDS = ('barcode_hash', 'serial_int')
 
     # Tracking deltas which are not recorded in the audit log
-    # (status / location changes are recorded as field changes, and the customer name via the customer reference)
+    # (status / location changes are recorded as field changes; 'customer_name' is retained for historical callers)
     AUDIT_IGNORE_DELTAS = (
         'status',
         'status_logical',
@@ -1387,22 +1386,33 @@ class StockItem(
 
         return self.consumed_by
 
-    # Read-only helpers which provide the (legacy) view of the consumer of this stock item
+    # Read-only helpers which provide the (legacy) view of the consumer of this stock item.
+    # Deprecated: These are retained for compatibility (e.g. report templates and plugins),
+    # and will be removed in a future release. Use 'consumed_by' / 'consumer_model' instead.
     # Note: These are not database fields, and cannot be used in queries
 
     @property
     def belongs_to(self) -> Optional[StockItem]:
-        """Return the StockItem which this item is installed in (or None)."""
+        """Return the StockItem which this item is installed in (or None).
+
+        Deprecated: Use 'consumed_by' (where consumer_model is StockItem).
+        """
         return self._get_consumer_of_type(StockItem)
 
     @property
     def sales_order(self):
-        """Return the SalesOrder which this item has been shipped against (or None)."""
+        """Return the SalesOrder which this item has been shipped against (or None).
+
+        Deprecated: Use 'consumed_by' (where consumer_model is SalesOrder).
+        """
         return self._get_consumer_of_type(order.models.SalesOrder)
 
     @property
     def consumed_by_build(self):
-        """Return the Build which has consumed this stock item (or None)."""
+        """Return the Build which has consumed this stock item (or None).
+
+        Deprecated: Use 'consumed_by' (where consumer_model is Build).
+        """
         return self._get_consumer_of_type(build.models.Build)
 
     @property
