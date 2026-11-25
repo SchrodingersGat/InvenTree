@@ -181,26 +181,6 @@ for (const savedFilter of [false, true]) {
           .getByRole('link', { name: consumers[0].reference, exact: true })
           .click();
         await expect(page).toHaveURL(new RegExp(`/company/${consumers[0].pk}`));
-        // The column is available (but hidden by default) in other stock tables
-        await navigate(page, `part/${partId}/stock`);
-        await clearTableFilters(page);
-        await expect(header).toHaveCount(0);
-        await page.getByLabel('table-select-columns').click();
-        await page
-          .getByRole('checkbox', { name: 'Consumed By', exact: true })
-          .check();
-        await page.keyboard.press('Escape');
-        await expect(header).toBeVisible();
-        await expect(
-          page.getByRole('link', { name: consumers[1].reference, exact: true })
-        ).toBeVisible();
-
-        // Restore the default column visibility
-        await page.getByLabel('table-select-columns').click();
-        await page
-          .getByRole('checkbox', { name: 'Consumed By', exact: true })
-          .uncheck();
-        await page.keyboard.press('Escape');
       }
     } finally {
       try {
@@ -235,3 +215,149 @@ for (const savedFilter of [false, true]) {
     }
   });
 }
+
+/**
+ * Create a salable part with two stock items, and consume one of them
+ * by assigning it to a (new) customer.
+ */
+const setupConsumedStock = async (api: any) => {
+  const create = async (url: string, data: object) => {
+    const response = await api.post(url, { data });
+    expect(response.status(), await response.text()).toBe(201);
+    const body = await response.json();
+    return Array.isArray(body) ? body[0] : body;
+  };
+
+  const uid = generateUUID().slice(0, 8);
+
+  const part = await create('part/', {
+    name: `Consumed part ${uid}`,
+    component: true,
+    salable: true
+  });
+
+  const customer = await create('company/', {
+    name: `Consuming customer ${uid}`,
+    is_customer: true
+  });
+
+  const consumed = await create('stock/', {
+    part: part.pk,
+    quantity: 1,
+    batch: `CONSUMED-${uid}`
+  });
+
+  const available = await create('stock/', {
+    part: part.pk,
+    quantity: 1,
+    batch: `AVAILABLE-${uid}`
+  });
+
+  const assign = await api.post('stock/assign/', {
+    data: { items: [{ item: consumed.pk }], customer: customer.pk }
+  });
+  expect(assign.ok(), await assign.text()).toBeTruthy();
+
+  const cleanup = async () => {
+    for (const pk of [consumed.pk, available.pk])
+      await api.delete(`stock/${pk}/`);
+    await api.delete(`company/${customer.pk}/`);
+    await api.patch(`part/${part.pk}/`, { data: { active: false } });
+    await api.delete(`part/${part.pk}/`);
+  };
+
+  return { part, customer, consumed, available, cleanup };
+};
+
+test('Stock - Consumed badge', async ({ browser }) => {
+  const api = await createApi({});
+  const { customer, consumed, available, cleanup } =
+    await setupConsumedStock(api);
+
+  try {
+    const page = await doCachedLogin(browser, {
+      url: `stock/item/${consumed.pk}/details`
+    });
+
+    // The badge describes the consumer in its tooltip
+    const badge = page.getByText('Consumed', { exact: true });
+    await expect(badge).toBeVisible();
+    await badge.hover();
+    await expect(
+      page.getByText(
+        `This stock item has been assigned to a customer: ${customer.name}`
+      )
+    ).toBeVisible();
+
+    // An available stock item has no "consumed" badge
+    await navigate(page, `stock/item/${available.pk}/details`);
+    await expect(
+      page.getByText(`${available.batch}`, { exact: false }).first()
+    ).toBeVisible();
+    await expect(page.getByText('Consumed', { exact: true })).toHaveCount(0);
+  } finally {
+    await cleanup();
+    await api.dispose();
+  }
+});
+
+test('Stock - Consumed By column', async ({ browser }) => {
+  const api = await createApi({});
+  const { part, customer, consumed, available, cleanup } =
+    await setupConsumedStock(api);
+
+  try {
+    const page = await doCachedLogin(browser, {
+      url: `part/${part.pk}/stock`
+    });
+
+    // Show consumed stock too
+    await clearTableFilters(page);
+    await expect(
+      page.getByRole('cell', { name: consumed.batch, exact: true })
+    ).toBeVisible();
+
+    // The column is available, but hidden by default
+    const header = page.getByRole('columnheader', {
+      name: 'Consumed By',
+      exact: true
+    });
+    await expect(header).toHaveCount(0);
+
+    const toggleColumn = async (show: boolean) => {
+      await page.getByLabel('table-select-columns').click();
+      const checkbox = page.getByRole('checkbox', {
+        name: 'Consumed By',
+        exact: true
+      });
+      await (show ? checkbox.check() : checkbox.uncheck());
+      await page.keyboard.press('Escape');
+    };
+
+    await toggleColumn(true);
+    await expect(header).toBeVisible();
+
+    // The consumed item links to its consumer
+    const row = page.getByRole('row').filter({
+      has: page.getByRole('cell', { name: consumed.batch, exact: true })
+    });
+    await expect(
+      row.getByRole('link', { name: customer.name, exact: true })
+    ).toHaveAttribute('href', `/web/company/${customer.pk}/`);
+
+    // The available item has no consumer
+    const availableRow = page.getByRole('row').filter({
+      has: page.getByRole('cell', { name: available.batch, exact: true })
+    });
+    await expect(
+      availableRow.getByRole('link', { name: customer.name })
+    ).toHaveCount(0);
+
+    // Restore the default column visibility
+    await toggleColumn(false);
+    await expect(header).toHaveCount(0);
+  } finally {
+    await cleanup();
+    await api.dispose();
+  }
+});

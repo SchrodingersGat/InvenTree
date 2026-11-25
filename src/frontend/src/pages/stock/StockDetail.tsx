@@ -40,6 +40,7 @@ import NavigationTree from '../../components/nav/NavigationTree';
 import { PageDetail } from '../../components/nav/PageDetail';
 import { PanelGroup } from '../../components/panels/PanelGroup';
 import LocateItemButton from '../../components/plugins/LocateItemButton';
+import { consumerSummary } from '../../components/render/Consumer';
 import { StatusRenderer } from '../../components/render/StatusRenderer';
 import OrderPartsWizard from '../../components/wizards/OrderPartsWizard';
 import { useApi } from '../../contexts/ApiContext';
@@ -730,6 +731,13 @@ export default function StockDetail() {
             tooltip={t`This stock item has passed its expiry date`}
             visible={enableExpiry && stockitem.expired}
             key='expired'
+          />,
+          <DetailsBadge
+            color='grape'
+            label={t`Consumed`}
+            tooltip={consumerSummary(stockitem)}
+            visible={!!stockitem.consumed_by_model_type}
+            key='consumed'
           />,
           <DetailsBadge
             color='red'

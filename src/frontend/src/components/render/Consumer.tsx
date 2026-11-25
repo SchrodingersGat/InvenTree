@@ -103,3 +103,29 @@ export function RenderConsumer({
     />
   );
 }
+
+/**
+ * Return a plain-text summary of the consumer of a stock item (e.g. for a tooltip)
+ */
+export function consumerSummary(record: any): string {
+  const modelType: string | null = record?.consumed_by_model_type ?? null;
+
+  if (!modelType) {
+    return '';
+  }
+
+  const modelId: number | null = record?.consumed_by_model_id ?? null;
+  const detail: ConsumedByDetail | null = record?.consumed_by_detail ?? null;
+
+  let name: string;
+
+  if (detail?.deleted) {
+    name = `${t`Deleted`} ${modelType} #${modelId}`;
+  } else if (detail?.name) {
+    name = detail.name;
+  } else {
+    name = `${modelType} #${modelId}`;
+  }
+
+  return `${consumerDescription(modelType)}: ${name}`;
+}
