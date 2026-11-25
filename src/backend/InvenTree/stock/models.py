@@ -2569,6 +2569,12 @@ class StockItem(
         if self.serialized:
             return None
 
+        # Serialized items would inherit the consumer (without being consumed via consume_stock)
+        if self.is_consumed:
+            raise ValidationError(
+                _('Consumed stock cannot be serialized - return it to stock first')
+            )
+
         if not self.part.trackable:
             raise ValidationError({'part': _('Part is not set as trackable')})
 

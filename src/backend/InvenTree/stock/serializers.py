@@ -1846,11 +1846,17 @@ class StockAssignmentSerializer(serializers.Serializer):
         customer = data['customer']
         notes = data.get('notes', '')
 
-        with transaction.atomic():
-            for item in items:
-                stock_item = item['item']
+        from stock.consume import ConsumeRequest, consume_stock
 
-                stock_item.allocateToCustomer(customer, user=user, notes=notes)
+        # Consume all of the items (in full) in a single batched operation
+        consume_stock(
+            [
+                ConsumeRequest(item['item'], item['item'].quantity, customer)
+                for item in items
+            ],
+            user=user,
+            notes=notes,
+        )
 
 
 class StockMergeItemSerializer(serializers.Serializer):

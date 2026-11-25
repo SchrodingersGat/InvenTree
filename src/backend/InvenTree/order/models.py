@@ -3572,8 +3572,8 @@ class ReturnOrder(AuditedOrderMixin, TotalPriceMixin, Order):
 
         notes = kwargs.get('note', '')
 
-        if stock_item.consumer_model in (SalesOrder, Company):
-            # Return the stock item from the customer, back into stock
+        if stock_item.is_consumed:
+            # Return the stock item from its consumer (e.g. the customer), back into stock
             # (a partial quantity has already been split off, above)
             from stock.consume import release_stock
 

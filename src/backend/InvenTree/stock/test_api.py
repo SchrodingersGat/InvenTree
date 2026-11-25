@@ -4845,6 +4845,38 @@ class StockAssignTest(StockAPITestCase):
         # 5 stock items should now have been assigned to this customer
         self.assertEqual(customer.consumed_stock.count(), 5)
 
+    def test_batched(self):
+        """Assigning multiple items consumes them all in a single consume_stock() call."""
+        from unittest import mock
+
+        import stock.consume
+
+        items = [
+            StockItem.objects.create(
+                part=part.models.Part.objects.get(pk=25), quantity=i + 1
+            )
+            for i in range(3)
+        ]
+
+        with mock.patch.object(
+            stock.consume, 'consume_stock', wraps=stock.consume.consume_stock
+        ) as consume:
+            self.post(
+                self.URL,
+                data={'items': [{'item': item.pk} for item in items], 'customer': 4},
+                expected_code=201,
+            )
+
+        self.assertEqual(consume.call_count, 1)
+        self.assertEqual(len(consume.call_args.args[0]), 3)
+
+        customer = company.models.Company.objects.get(pk=4)
+
+        for item in items:
+            item.refresh_from_db()
+            self.assertEqual(item.consumed_by, customer)
+            self.assertIsNone(item.location)
+
 
 class StockMergeTest(StockAPITestCase):
     """Unit tests for merging stock items via the API."""

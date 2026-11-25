@@ -55,6 +55,9 @@ class StockItemAdmin(admin.ModelAdmin):
     # A list of search fields which can be used for lookup on matching 'autocomplete' fields
     search_fields = ['part__name', 'part__description', 'serial', 'batch']
 
+    # Stock is consumed / released via stock.consume (not by editing the consumer directly)
+    readonly_fields = ['consumed_by_model_type', 'consumed_by_model_id']
+
     autocomplete_fields = [
         'build',
         'location',

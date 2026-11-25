@@ -594,3 +594,45 @@ class ConsumerValidationTest(ConsumptionTestBase):
 
         with self.assertRaises(ValidationError):
             item.save()
+
+
+class ConsumptionPathTest(ConsumptionTestBase):
+    """Stock cannot be consumed or released other than via stock.consume."""
+
+    def test_serialize_consumed(self):
+        """Consumed stock cannot be serialized (which would copy the consumer)."""
+        item = self.stock(5, part=self.tracked)
+        consume_stock([ConsumeRequest(item, 5, self.customer)])
+        item.refresh_from_db()
+
+        with self.assertRaises(ValidationError):
+            item.serializeStock(2, ['S-1', 'S-2'], self.user)
+
+        self.assertFalse(
+            StockItem.objects.filter(part=self.tracked, serial='S-1').exists()
+        )
+
+    def test_admin_read_only(self):
+        """The consumer cannot be edited via the admin interface."""
+        from stock.admin import StockItemAdmin
+
+        self.assertIn('consumed_by_model_type', StockItemAdmin.readonly_fields)
+        self.assertIn('consumed_by_model_id', StockItemAdmin.readonly_fields)
+
+    def test_return_order_installed(self):
+        """Receiving any consumed item against a return order releases it."""
+        from order.models import ReturnOrder, ReturnOrderLineItem
+
+        parent = self.stock(1, part=self.assembly, serial='RO-P')
+        child = self.stock(1, part=self.tracked, serial='RO-C')
+        consume_stock([ConsumeRequest(child, 1, parent)])
+
+        ro = ReturnOrder.objects.create(customer=self.customer, reference='RMA-9100')
+        line = ReturnOrderLineItem.objects.create(order=ro, item=child, quantity=1)
+
+        ro.receive_line_item(line, self.returns, self.user)
+
+        child.refresh_from_db()
+        self.assertFalse(child.is_consumed)
+        self.assertEqual(child.location, self.returns)
+        self.assertNotIn(child, parent.get_consumed_stock())

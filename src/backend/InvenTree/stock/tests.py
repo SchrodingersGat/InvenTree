@@ -1804,6 +1804,9 @@ class TestResultTest(StockTestBase):
         item.serial = None
         item.quantity = 50
 
+        # The source item is installed in another item - the copy is not
+        item.consumed_by = None
+
         # Try with an invalid batch code (according to sample validation plugin)
         item.batch = 'X234'
 
