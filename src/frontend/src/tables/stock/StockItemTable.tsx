@@ -56,12 +56,12 @@ import { useUserState } from '../../states/UserState';
 function stockItemTableColumns({
   showLocation,
   showPricing,
-  showConsumedBy,
+  consumedByVisible,
   navigate
 }: {
   showLocation: boolean;
   showPricing: boolean;
-  showConsumedBy: boolean;
+  consumedByVisible: boolean;
   navigate: NavigateFunction;
 }): TableColumn[] {
   return [
@@ -98,7 +98,9 @@ function stockItemTableColumns({
       accessor: 'consumed_by_detail.name',
       title: t`Consumed By`,
       sortable: false,
-      hidden: !showConsumedBy,
+      switchable: true,
+      defaultVisible: consumedByVisible,
+      filter: ['consumed'],
       render: (record: any) => (
         <RenderConsumer record={record} navigate={navigate} />
       )
@@ -353,7 +355,7 @@ export function StockItemTable({
   allowAdd = false,
   showLocation = true,
   showPricing = true,
-  showConsumedBy = false,
+  consumedByVisible = false,
   allowReturn = false,
   initialFilters,
   defaultInStock = true,
@@ -363,7 +365,7 @@ export function StockItemTable({
   allowAdd?: boolean;
   showLocation?: boolean;
   showPricing?: boolean;
-  showConsumedBy?: boolean;
+  consumedByVisible?: boolean;
   allowReturn?: boolean;
   defaultInStock?: boolean | null;
   initialFilters?: TableFilter[];
@@ -408,10 +410,10 @@ export function StockItemTable({
       stockItemTableColumns({
         showLocation: showLocation ?? true,
         showPricing: showPricing ?? true,
-        showConsumedBy,
+        consumedByVisible,
         navigate
       }),
-    [showLocation, showPricing, showConsumedBy, navigate]
+    [showLocation, showPricing, consumedByVisible, navigate]
   );
 
   const tableFilters: TableFilter[] = useMemo(
@@ -521,7 +523,7 @@ export function StockItemTable({
           modelType: ModelType.stockitem,
           params: {
             ...params,
-            ...(showConsumedBy ? { consumed_by_detail: true } : {}),
+            consumed_by_detail: true,
             part_detail: true,
             location_detail: true,
             supplier_part_detail: true

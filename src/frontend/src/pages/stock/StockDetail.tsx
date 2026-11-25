@@ -285,7 +285,7 @@ export default function StockDetail() {
         content: stockitem?.pk ? (
           <StockItemTable
             tableName='child-stock'
-            showConsumedBy
+            consumedByVisible
             defaultInStock={null}
             params={{ parent: stockitem.pk }}
           />

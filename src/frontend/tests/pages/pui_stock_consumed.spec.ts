@@ -181,12 +181,26 @@ for (const savedFilter of [false, true]) {
           .getByRole('link', { name: consumers[0].reference, exact: true })
           .click();
         await expect(page).toHaveURL(new RegExp(`/company/${consumers[0].pk}`));
+        // The column is available (but hidden by default) in other stock tables
         await navigate(page, `part/${partId}/stock`);
+        await clearTableFilters(page);
         await expect(header).toHaveCount(0);
         await page.getByLabel('table-select-columns').click();
+        await page
+          .getByRole('checkbox', { name: 'Consumed By', exact: true })
+          .check();
+        await page.keyboard.press('Escape');
+        await expect(header).toBeVisible();
         await expect(
-          page.getByRole('checkbox', { name: 'Consumed By', exact: true })
-        ).toHaveCount(0);
+          page.getByRole('link', { name: consumers[1].reference, exact: true })
+        ).toBeVisible();
+
+        // Restore the default column visibility
+        await page.getByLabel('table-select-columns').click();
+        await page
+          .getByRole('checkbox', { name: 'Consumed By', exact: true })
+          .uncheck();
+        await page.keyboard.press('Escape');
       }
     } finally {
       try {
